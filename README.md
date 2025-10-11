@@ -177,6 +177,6 @@ See spec.txt for complete technical details on the conversation format.
 This project is licensed under the MIT License with additional terms - see the [LICENSE](LICENSE) file for details.
 **Important:** Use of this software for training AI or machine learning models is strictly prohibited. See the LICENSE file for details.
 
-## Credits
+## Author
 
-Copyright (c) 2025 Florian Fischer
+Florian Fischer
