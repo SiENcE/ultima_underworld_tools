@@ -2,6 +2,8 @@
 
 UWScript is a higher-level programming language designed to create conversations for Ultima Underworld games. It compiles down to the assembly code understood by the original game engine and the VM runner.
 
+![UW Fantasy Console](uw_vm_console.png)
+
 ## Enhanced Version with Array Support
 
 The enhanced version adds powerful array capabilities to UWScript:

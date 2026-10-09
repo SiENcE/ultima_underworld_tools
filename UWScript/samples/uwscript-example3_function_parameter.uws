@@ -1,0 +1,106 @@
+// Riddle Master - Compatible version
+let met_master = get_quest(20)
+let riddles_solved = get_quest(21)
+let reward_given = get_quest(22)
+
+// Helper function for riddles
+function pose_riddle(riddle_num)
+    if riddle_num == 1
+        say "Riddle the first: I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?"
+        ask answer
+        return compare(answer, "echo")
+    elseif riddle_num == 2
+        say "Riddle the second: The more you take, the more you leave behind. What am I?"
+        ask answer
+        return compare(answer, "footsteps")
+    else
+        say "Riddle the third: I have cities, but no houses. I have mountains, but no trees. I have water, but no fish. What am I?"
+        ask answer
+        return compare(answer, "map")
+    endif
+endfunction
+
+// Start conversation
+if met_master == 0
+    say "Ah, a seeker of knowledge approaches! I am the Riddle Master."
+    say "Those who can solve my riddles often find that wisdom brings... tangible rewards."
+    set_quest(20, 3)
+else
+    say "The seeker returns! Your mind must hunger for more challenges."
+endif
+
+// Main conversation loop
+label main_conversation
+say "What brings you to my chamber of enigmas today?"
+
+menu choice [
+    "I wish to hear your riddles",
+    "Tell me about yourself",
+    "I've heard you possess a magic item",
+    "I must go now"
+]
+
+if choice == 1
+    // Riddle path
+    if riddles_solved >= 3
+        say "You have already mastered all my riddles! There is nothing more I can teach you."
+    else
+        say "Very well. Listen carefully to my words."
+        
+        let current_riddle = riddles_solved + 1
+        let success = pose_riddle(current_riddle)
+        
+        if success
+            say "Correct! Your mind is sharper than most who wander these halls."
+            riddles_solved += 1
+            set_quest(21, riddles_solved)
+            
+            if riddles_solved >= 3
+                say "Remarkable! You have solved all my riddles."
+                say "Few have managed such a feat. You have earned both my respect and a reward."
+                
+                if reward_given == 0
+                    say "Take this ancient amulet. It will protect you from harmful magics."
+                    set_quest(22, 1)
+                endif
+            endif
+        else
+            say "Incorrect! The answer eludes you. Perhaps meditation will clear your mind."
+        endif
+    endif
+elseif choice == 2
+    // Lore path
+    say "I have dwelled in these depths for countless years, gathering knowledge and crafting puzzles."
+    say "The Abyss holds many secrets - some dangerous, others enlightening."
+    say "I test those who pass through, for only the wise should proceed deeper."
+elseif choice == 3
+    // Item path
+    if riddles_solved >= 3 and reward_given == 0
+        say "Indeed I do! And you have proven worthy of it."
+        say "Take this ancient amulet. It will protect you from harmful magics."
+        set_quest(22, 1)
+    elseif reward_given == 1
+        say "I have already given you the amulet of protection. Use it wisely."
+    else
+        say "Indeed I do. But such power is only bestowed upon those who prove their wisdom."
+        say "Solve my riddles first, seeker."
+    endif
+else
+    // Exit path
+    say "The path to wisdom is never straight. Return when you wish to exercise your mind further."
+    exit
+endif
+
+// Ask if player wants to continue conversation
+say "Is there something else you wish to know?"
+menu continue_choice [
+    "Yes, I have more questions",
+    "No, I will take my leave"
+]
+
+if continue_choice == 1
+    goto main_conversation
+else
+    say "Until our paths cross again, seeker."
+    exit
+endif

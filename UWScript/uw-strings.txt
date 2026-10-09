@@ -1,0 +1,5 @@
+STRINGS.PAK: 1 string blocks.
+
+block: 0001; 2 strings.
+0: Arrow keys to move, UP to jump, ESC to quit
+1: Game Over!

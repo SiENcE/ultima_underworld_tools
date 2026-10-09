@@ -372,80 +372,64 @@ class FantasyConsole(UltimaUnderworldVM):
             self.result_register = 0  # Failure
 
     def func_gfx_sprite(self):
-            """Draw a sprite from sprite data array (ID: 106) - DEBUG VERSION"""
-            args = self.pop()  # Number of arguments
+        """Optimized sprite rendering (replace existing func_gfx_sprite)"""
+        args = self.pop()
+        
+        if args >= 3:
+            ptr_sprite_data = self.pop()
+            ptr_y = self.pop()
+            ptr_x = self.pop()
             
-            if args >= 3:
-                ptr_sprite_data = self.pop()
-                ptr_y = self.pop()
-                ptr_x = self.pop()
+            sprite_data_addr = self.get_mem(ptr_sprite_data)
+            y = self.get_mem(ptr_y)
+            x = self.get_mem(ptr_x)
+            
+            # Read sprite dimensions
+            width = self.get_mem(sprite_data_addr)
+            height = self.get_mem(sprite_data_addr + 1)
+            
+            # Validate dimensions
+            if width <= 0 or height <= 0 or width > 64 or height > 64:
+                self.log(f"GFX_SPRITE: Invalid sprite dimensions {width}x{height}")
+                self.result_register = 0
+                return
+            
+            # Early culling - don't render if completely off screen
+            if x >= self.screen_width or y >= self.screen_height or x + width <= 0 or y + height <= 0:
+                self.result_register = 1  # Success but skipped
+                return
+            
+            # OPTIMIZATION: Batch pixel operations
+            pixel_index = 2
+            
+            for sy in range(height):
+                screen_y = y + sy
                 
-                sprite_data_addr = self.get_mem(ptr_sprite_data)
-                y = self.get_mem(ptr_y)
-                x = self.get_mem(ptr_x)
-                
-                # Read sprite dimensions
-                width = self.get_mem(sprite_data_addr)
-                height = self.get_mem(sprite_data_addr + 1)
-                
-                # DEBUG: Print sprite data details
-                self.log(f"GFX_SPRITE: sprite_data_addr={sprite_data_addr}, x={x}, y={y}")
-                self.log(f"GFX_SPRITE: width={width}, height={height}")
-                
-                # DEBUG: Print first few pixels of sprite data
-                self.log("GFX_SPRITE: First 16 pixels of sprite data:")
-                for i in range(min(16, width * height)):
-                    pixel_addr = sprite_data_addr + 2 + i
-                    pixel_value = self.get_mem(pixel_addr)
-                    self.log(f"  Pixel {i}: addr={pixel_addr}, value={pixel_value}")
-                
-                # Validate dimensions
-                if width <= 0 or height <= 0 or width > 64 or height > 64:
-                    self.log(f"GFX_SPRITE: Invalid sprite dimensions {width}x{height}")
-                    self.result_register = 0
-                    return
-                
-                self.log(f"GFX_SPRITE: Drawing sprite {width}x{height} at ({x}, {y})")
-                
-                # Draw the sprite pixel by pixel
-                pixel_index = 2  # Start after width and height
-                
-                for sy in range(height):
-                    for sx in range(width):
-                        # Get pixel color from sprite data
-                        pixel_addr = sprite_data_addr + pixel_index
-                        pixel_color = self.get_mem(pixel_addr) & 0xF
+                # Skip rows that are off screen
+                if screen_y < 0 or screen_y >= self.screen_height:
+                    pixel_index += width
+                    continue
+                    
+                for sx in range(width):
+                    screen_x = x + sx
+                    
+                    # Skip pixels that are off screen
+                    if screen_x < 0 or screen_x >= self.screen_width:
                         pixel_index += 1
-                        
-                        # Calculate screen position
-                        screen_x = x + sx
-                        screen_y = y + sy
-                        
-                        # DEBUG: Print specific problematic pixel
-                        if sx == 7 and sy == 3:
-                            self.log(f"GFX_SPRITE: DEBUGGING pixel (7,3)")
-                            self.log(f"  sprite_data_addr={sprite_data_addr}")
-                            self.log(f"  pixel_index={pixel_index-1}")
-                            self.log(f"  pixel_addr={pixel_addr}")
-                            self.log(f"  pixel_color={pixel_color}")
-                            self.log(f"  screen_pos=({screen_x},{screen_y})")
-                        
-                        # Only draw non-transparent pixels within screen bounds
-                        if (pixel_color != 0 and 
-                            0 <= screen_x < self.screen_width and 
-                            0 <= screen_y < self.screen_height):
-                            
-                            self.display_buffer[screen_y][screen_x] = pixel_color
-                            
-                            # DEBUG: Log the pixel we just set
-                            if sx == 7 and sy == 3:
-                                self.log(f"  Set display_buffer[{screen_y}][{screen_x}] = {pixel_color}")
-                
-                self.log(f"GFX_SPRITE: Drew sprite at ({x}, {y}) with size {width}x{height}")
-                self.result_register = 1  # Success
-            else:
-                self.log("GFX_SPRITE: Not enough arguments")
-                self.result_register = 0  # Failure
+                        continue
+                    
+                    # Get pixel color
+                    pixel_color = self.get_mem(sprite_data_addr + pixel_index) & 0xF
+                    pixel_index += 1
+                    
+                    # Only draw non-transparent pixels
+                    if pixel_color != 0:
+                        self.display_buffer[screen_y][screen_x] = pixel_color
+            
+            self.result_register = 1  # Success
+        else:
+            self.log("GFX_SPRITE: Not enough arguments")
+            self.result_register = 0
 
     # Sound functions
     
@@ -690,84 +674,111 @@ class FantasyConsole(UltimaUnderworldVM):
             self.log("ESC key is pressed!")
         
     def execute_game_loop(self):
-        """Execute the VM with a game loop"""
+        """Optimized game loop with performance monitoring"""
+        import time
+        
         self.pc = 0
         self.finished = False
         last_frame_time = time.time()
+        frame_count = 0
+        performance_counter = 0
         
         # Main game loop
         while not self.finished:
+            frame_start = time.time()
+            
             # Handle input
             self.handle_input()
             
-            # Check timing for frame rate control
-            current_time = time.time()
-            elapsed = current_time - last_frame_time
-            
-            # Execute VM instructions (with a limit per frame to prevent freezing)
+            # Execute VM instructions with optimized limits
             steps = 0
+            max_steps = 10000  # Increased for complex games
             
-            # Execute at least one step to keep the VM running
             should_execute_more = True
             
             while should_execute_more and not self.finished and not self.waiting_response and self.pc < len(self.code):
                 # Execute one instruction
-                opcode = self.code[self.pc]
-                handler = self.opcode_handlers.get(opcode)
-                
-                if handler:
-                    handler()
-                else:
-                    print(f"Unknown opcode: 0x{opcode:02X} at PC={self.pc}")
-                    self.pc += 1
-                
-                steps += 1
-                
-                # Check execution conditions
-                if steps >= self.max_steps_per_frame:
-                    # Too many steps - force a break to prevent freezing
-                    print(f"Warning: Reached max steps per frame ({self.max_steps_per_frame})")
-                    should_execute_more = False
-                elif self.display_update_requested:
-                    # Stop after display update is requested to force frame render
-                    should_execute_more = False
-                
-                # Check if program is finished
-                if self.pc >= len(self.code):
-                    self.log("End of code reached")
+                try:
+                    opcode = self.code[self.pc]
+                    handler = self.opcode_handlers.get(opcode)
+                    
+                    if handler:
+                        handler()
+                    else:
+                        print(f"Unknown opcode: 0x{opcode:02X} at PC={self.pc}")
+                        self.pc += 1
+                    
+                    steps += 1
+                    
+                    # OPTIMIZATION: Stop on display update for frame pacing
+                    if self.display_update_requested:
+                        should_execute_more = False
+                    elif steps >= max_steps:
+                        print(f"Warning: Frame exceeded {max_steps} steps")
+                        should_execute_more = False
+                    
+                except Exception as e:
+                    print(f"VM Error at PC={self.pc}: {e}")
                     self.finished = True
+                    break
             
             # Update display
             self.update_display()
             
-            # Limit frame rate
-            current_time = time.time()
-            frame_time = current_time - last_frame_time
-            if frame_time < self.frame_delay:
-                time.sleep(self.frame_delay - frame_time)
-                
-            last_frame_time = time.time()
+            # Performance monitoring
+            frame_time = time.time() - frame_start
+            frame_count += 1
+            performance_counter += 1
             
-            # Handle waiting response (for dialogs, etc.)
+            if performance_counter >= 60:  # Every 60 frames
+                avg_fps = 60 / (time.time() - last_frame_time + 0.001)  # Avoid div by zero
+                if avg_fps < 20:
+                    print(f"WARNING: Low performance! FPS: {avg_fps:.1f}")
+                elif frame_count % 300 == 0:  # Every 5 seconds
+                    print(f"Performance: {avg_fps:.1f} FPS")
+                
+                last_frame_time = time.time()
+                performance_counter = 0
+            
+            # Limit frame rate
+            target_frame_time = 1.0 / self.fps
+            if frame_time < target_frame_time:
+                time.sleep(target_frame_time - frame_time)
+            
+            # Handle waiting response
             if self.waiting_response:
-                # This would be handled by the input system
                 pass
         
-        # Keep window open a bit after program ends
-        waiting_end = True
-        end_time = pygame.time.get_ticks() + 3000  # 3 seconds
-        
-        while waiting_end:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    waiting_end = False
-                elif event.type == pygame.KEYDOWN:
-                    waiting_end = False
-            
-            pygame.display.flip()
-            self.clock.tick(30)
-        
         pygame.quit()
+
+    # PATCH 4: Add performance profiling function
+    def profile_vm_performance(self):
+        """Add this method to FantasyConsole class for performance debugging"""
+        instruction_counts = {}
+        
+        # Count instruction frequency
+        pc = 0
+        while pc < len(self.code):
+            opcode = self.code[pc]
+            opcode_name = self.get_opcode_name(opcode) if hasattr(self, 'get_opcode_name') else f"0x{opcode:02X}"
+            
+            if opcode_name not in instruction_counts:
+                instruction_counts[opcode_name] = 0
+            instruction_counts[opcode_name] += 1
+            
+            # Skip operands for instructions that have them
+            if opcode in [0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x17]:  # Instructions with operands
+                pc += 2
+            else:
+                pc += 1
+        
+        # Print top instruction types
+        print("\n=== VM Instruction Profile ===")
+        sorted_instructions = sorted(instruction_counts.items(), key=lambda x: x[1], reverse=True)
+        for opcode, count in sorted_instructions[:10]:
+            print(f"{opcode}: {count} times")
+        print("===============================\n")
+
 
 def main():
     """Main function to run the FantasyUW console"""
@@ -786,6 +797,7 @@ def main():
     
     # Create console
     console = FantasyConsole(debug=args.debug)
+    console.profile_vm_performance()  # Before loading
     console.fps = args.fps
     console.frame_delay = 1.0 / args.fps
     

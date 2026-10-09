@@ -33,8 +33,6 @@ label game_loop
 	if is_key_pressed(KEY_SPACE)
 		current_effect = (current_effect + 1) % 6
 	endif
-	
-	say "current_effect: " + current_effect
 
 	run_circle_test()  // This would now work!
 

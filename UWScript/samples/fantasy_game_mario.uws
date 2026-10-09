@@ -1,0 +1,236 @@
+// Optimized Mario Bros World 1-1 (Performance-Safe Version)
+// Reduced complexity for VM compatibility
+
+// Key codes
+let KEY_UP = 0
+let KEY_LEFT = 2
+let KEY_RIGHT = 3
+let KEY_ESCAPE = 6
+
+// Reduced map size for better performance
+let TILE_SIZE = 8
+let SCREEN_WIDTH = 128
+let SCREEN_HEIGHT = 128
+let MAP_WIDTH = 32    // Reduced from 80
+let MAP_HEIGHT = 12   // Reduced from 16
+
+// Mario sprite (8x8)
+let mario_sprite = [
+    8, 8,
+    0, 0, 2, 2, 2, 0, 0, 0,
+    0, 2, 2, 2, 2, 2, 2, 0,
+    0, 6, 1, 6, 1, 6, 0, 0,
+    0, 6, 6, 6, 6, 6, 6, 0,
+    0, 2, 4, 2, 2, 2, 0, 0,
+    0, 4, 4, 4, 4, 4, 4, 0,
+    0, 6, 6, 0, 6, 6, 6, 0,
+    0, 6, 6, 6, 0, 0, 0, 0
+]
+
+// Ground tile (8x8)
+let ground_tile = [
+    8, 8,
+    6, 6, 6, 6, 6, 6, 6, 6,
+    6, 5, 6, 6, 6, 5, 6, 6,
+    6, 6, 6, 5, 6, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 5, 6,
+    6, 5, 6, 6, 5, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 6, 6,
+    6, 6, 5, 6, 6, 6, 6, 5,
+    6, 6, 6, 6, 6, 6, 6, 6
+]
+
+// Brick block (8x8)
+let brick_tile = [
+    8, 8,
+    13, 13, 13, 13, 13, 13, 13, 13,
+    13, 5, 5, 13, 13, 5, 5, 13,
+    13, 5, 5, 13, 13, 5, 5, 13,
+    13, 13, 13, 13, 13, 13, 13, 13,
+    13, 5, 5, 13, 13, 5, 5, 13,
+    13, 5, 5, 13, 13, 5, 5, 13,
+    13, 13, 13, 13, 13, 13, 13, 13,
+    13, 5, 5, 13, 13, 5, 5, 13
+]
+
+// Question block (8x8)
+let question_tile = [
+    8, 8,
+    5, 5, 5, 5, 5, 5, 5, 5,
+    5, 1, 1, 1, 1, 1, 1, 5,
+    5, 1, 0, 0, 1, 0, 1, 5,
+    5, 1, 0, 1, 1, 0, 1, 5,
+    5, 1, 0, 0, 1, 0, 1, 5,
+    5, 1, 0, 0, 0, 0, 1, 5,
+    5, 1, 0, 0, 1, 0, 1, 5,
+    5, 5, 5, 5, 5, 5, 5, 5
+]
+
+// Pipe tile (8x8)
+let pipe_tile = [
+    8, 8,
+    3, 3, 3, 3, 3, 3, 3, 3,
+    3, 11, 11, 3, 3, 11, 11, 3,
+    3, 11, 11, 3, 3, 11, 11, 3,
+    3, 3, 3, 3, 3, 3, 3, 3,
+    3, 3, 3, 3, 3, 3, 3, 3,
+    3, 11, 11, 3, 3, 11, 11, 3,
+    3, 11, 11, 3, 3, 11, 11, 3,
+    3, 3, 3, 3, 3, 3, 3, 3
+]
+
+// Optimized level layout (32 tiles wide x 12 tiles high = 384 elements)
+// 0=air, 1=ground, 2=brick, 3=question, 4=pipe
+let level = [
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,2,2,3,2,0,0,0,0,0,0,2,3,2,0,0,0,0,4,4,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,0,0,0,0,0,0,0,0,0,
+    1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+]
+
+// Player state
+let player_x = 24
+let player_y = 64
+let player_vel_x = 0
+let player_vel_y = 0
+let on_ground = false
+let camera_x = 0
+let running = true
+
+// Physics constants
+let gravity = 1
+let jump_power = -5
+let move_speed = 2
+
+say "Optimized Mario World 1-1! Arrow keys to move, UP to jump!"
+
+label game_loop
+    // Input handling
+    player_vel_x = 0
+    
+    if is_key_pressed(KEY_LEFT)
+        player_vel_x = -move_speed
+    endif
+    
+    if is_key_pressed(KEY_RIGHT)
+        player_vel_x = move_speed
+    endif
+    
+    if is_key_pressed(KEY_UP) and on_ground
+        player_vel_y = jump_power
+        on_ground = false
+    endif
+    
+    if is_key_pressed(KEY_ESCAPE)
+        running = false
+    endif
+    
+    // Physics update
+    player_x += player_vel_x
+    player_y += player_vel_y
+    player_vel_y += gravity
+    
+    // Simple collision detection
+    let tile_x = player_x / TILE_SIZE
+    let tile_y = (player_y + 7) / TILE_SIZE
+    
+    on_ground = false
+    
+    if tile_x >= 0 and tile_x < MAP_WIDTH and tile_y >= 0 and tile_y < MAP_HEIGHT
+        let map_index = tile_y * MAP_WIDTH + tile_x
+        let tile_type = level[map_index]
+        
+        if tile_type > 0 and player_vel_y >= 0
+            player_y = tile_y * TILE_SIZE - 8
+            player_vel_y = 0
+            on_ground = true
+        endif
+    endif
+    
+    // Boundary checks
+    if player_x < 0
+        player_x = 0
+    endif
+    
+    let max_x = MAP_WIDTH * TILE_SIZE - 8
+    if player_x > max_x
+        player_x = max_x
+    endif
+    
+    if player_y > 96
+        player_y = 64
+        player_x = 24
+    endif
+    
+    // Camera update
+    camera_x = player_x - 60
+    if camera_x < 0
+        camera_x = 0
+    endif
+    
+    let max_camera = MAP_WIDTH * TILE_SIZE - SCREEN_WIDTH
+    if camera_x > max_camera
+        camera_x = max_camera
+    endif
+    
+    // Rendering
+    clear_screen(12)
+    
+    // Calculate visible tile range
+    let start_tile = camera_x / TILE_SIZE
+    let end_tile = start_tile + 17
+    
+    if end_tile > MAP_WIDTH
+        end_tile = MAP_WIDTH
+    endif
+    
+    // Render visible tiles only
+    let row = 0
+    while row < MAP_HEIGHT
+        let col = start_tile
+        while col < end_tile
+            let screen_x = col * TILE_SIZE - camera_x
+            let screen_y = row * TILE_SIZE
+            
+            // Only render if on screen
+            if screen_x >= -8 and screen_x < SCREEN_WIDTH
+                let tile_index = row * MAP_WIDTH + col
+                let tile_type = level[tile_index]
+                
+                if tile_type == 1
+                    draw_sprite(screen_x, screen_y, ground_tile)
+                elseif tile_type == 2
+                    draw_sprite(screen_x, screen_y, brick_tile)
+                elseif tile_type == 3
+                    draw_sprite(screen_x, screen_y, question_tile)
+                elseif tile_type == 4
+                    draw_sprite(screen_x, screen_y, pipe_tile)
+                endif
+            endif
+            
+            col += 1
+        endwhile
+        row += 1
+    endwhile
+    
+    // Draw player
+    let player_screen_x = player_x - camera_x
+    draw_sprite(player_screen_x, player_y, mario_sprite)
+    
+    // Update display
+    flip_display()
+    
+    if running
+        goto game_loop
+    endif
+
+say "Game completed! Thanks for playing!"
+exit

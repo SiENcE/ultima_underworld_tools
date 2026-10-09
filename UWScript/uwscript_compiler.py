@@ -1035,16 +1035,36 @@ class Parser:
                     node.name = left.name
                     node.arguments = []
                     
+                    # Skip any EOL tokens or comments after the opening parenthesis
+                    while self._match(TokenType.EOL) or self._match(TokenType.COMMENT):
+                        self._consume()
+                    
                     # Parse arguments (if any)
                     if not self._match(TokenType.PUNCTUATION, ')'):
                         while True:
+                            # Skip any leading EOL tokens or comments before each argument
+                            while self._match(TokenType.EOL) or self._match(TokenType.COMMENT):
+                                self._consume()
+                            
+                            # Check if we've reached the end parenthesis after skipping EOLs/comments
+                            if self._match(TokenType.PUNCTUATION, ')'):
+                                break
+                            
+                            # Parse one argument
                             arg = self._parse_expression()
                             node.arguments.append(arg)
                             
-                            if not self._match(TokenType.PUNCTUATION, ','):
+                            # Expect comma or end of arguments
+                            if self._match(TokenType.PUNCTUATION, ','):
+                                self._consume()  # Consume the comma
+                                # Skip any EOL tokens or comments after the comma
+                                while self._match(TokenType.EOL) or self._match(TokenType.COMMENT):
+                                    self._consume()
+                            else:
+                                # Skip any trailing EOL tokens or comments before the closing parenthesis
+                                while self._match(TokenType.EOL) or self._match(TokenType.COMMENT):
+                                    self._consume()
                                 break
-                            
-                            self._consume()  # Consume the comma
                     
                     # Expect ')'
                     self._expect(TokenType.PUNCTUATION, ')')
@@ -1576,17 +1596,49 @@ class CodeGenerator:
                 if self.variable_types.get(array_name) != 'array':
                     raise TypeError(f"Variable '{array_name}' is not an array")
                 
-                # Generate code for the index
-                self._generate_code(node.target.index)
-                
-                # Calculate address: base + index
-                self._emit(f"PUSHI {var_id}")
-                self._emit("OPADD")
-                
-                # Value is already on stack, address is now on stack
-                # Swap them to get address, value
-                self._emit("SWAP")
-                self._emit("STO")
+                if node.operator == '=':
+                    # Simple assignment
+                    # Generate code for the index
+                    self._generate_code(node.target.index)
+                    
+                    # Calculate address: base + index
+                    self._emit(f"PUSHI_EFF {var_id}")
+                    self._emit("OPADD")
+                    
+                    # Value is already on stack, address is now on stack
+                    # Swap them to get address, value
+                    self._emit("SWAP")
+                    self._emit("STO")
+                else:
+                    # Compound assignment (+=, -=, *=, /=)
+                    # Calculate the target address first
+                    self._generate_code(node.target.index)
+                    self._emit(f"PUSHI_EFF {var_id}")
+                    self._emit("OPADD")
+                    
+                    # Save the address in result register for later use
+                    self._emit("SAVE_REG")
+                    
+                    # Load current value from address
+                    self._emit("PUSH_REG")  # Push address back
+                    self._emit("FETCHM")    # Load current value: [value, current_value]
+                    
+                    # Apply the operation (stack: [value, current_value])
+                    if node.operator == '+=':
+                        self._emit("OPADD")  # current_value + value (commutative)
+                    elif node.operator == '-=':
+                        self._emit("SWAP")   # [current_value, value]
+                        self._emit("OPSUB")  # current_value - value
+                    elif node.operator == '*=':
+                        self._emit("OPMUL")  # current_value * value (commutative)
+                    elif node.operator == '/=':
+                        self._emit("SWAP")   # [current_value, value]
+                        self._emit("OPDIV")  # current_value / value
+                    
+                    # Store result back to address
+                    self._emit("PUSH_REG")  # Push address: [result, address]
+                    self._emit("SWAP")      # [address, result]
+                    self._emit("STO")       # Store result at address
             else:
                 raise SyntaxError("Invalid assignment target")
         
@@ -1866,7 +1918,7 @@ class CodeGenerator:
             self._generate_code(node.index)
             
             # Calculate address: base + index
-            self._emit(f"PUSHI {var_id}")
+            self._emit(f"PUSHI_EFF {var_id}")    # ← FIX: Use PUSHI_EFF instead of PUSHI
             self._emit("OPADD")
             
             # Load the value at that address

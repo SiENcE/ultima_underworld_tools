@@ -532,8 +532,8 @@ class UltimaUnderworldVM:
         return opcode_names.get(opcode, f"UNKNOWN(0x{opcode:02X})")
     
     def initialize_memory(self):
-        """Initialize memory with default values for the game variables"""
-        # These correspond to the imported globals in the C# reference
+        """Enhanced memory initialization for large games"""
+        # Game globals (keep original)
         game_globals = [0] * 32
         game_globals[0] = 0         # play_hunger
         game_globals[1] = 30        # play_health
@@ -549,14 +549,14 @@ class UltimaUnderworldVM:
         game_globals[11] = 0        # play_sex
         game_globals[12] = 32       # npc_xhome
         game_globals[13] = 32       # npc_yhome
-        game_globals[14] = 0x010C   # npc_whoami - Conversation Slot
+        game_globals[14] = 0x010C   # npc_whoami
         game_globals[15] = 0        # npc_hunger
         game_globals[16] = 30       # npc_health
         game_globals[17] = 30       # npc_hp
         game_globals[18] = 0        # npc_arms
         game_globals[19] = 0        # npc_power
         game_globals[20] = 8        # npc_goal
-        game_globals[21] = 3        # npc_attitude - friendly
+        game_globals[21] = 3        # npc_attitude
         game_globals[22] = 0        # npc_gtarg
         game_globals[23] = 0        # npc_talkedto
         game_globals[24] = 0        # npc_level
@@ -566,30 +566,24 @@ class UltimaUnderworldVM:
         game_globals[28] = 1        # game_time
         game_globals[29] = 1        # game_days
         game_globals[30] = 1        # game_mins
-        game_globals[31] = 0        # first_encounter flag (0 -> first time talking)
+        game_globals[31] = 0        # first_encounter flag
         
         # Set the game globals in memory
         self.imported_globals_count = len(game_globals)
         for i, value in enumerate(game_globals):
             self.memory[i] = value
         
-        # CRITICAL FIX: Adjust memory layout to avoid stack collision with user variables
-        # Set up memory layout based on the spec
+        # CRITICAL FIX: Much larger separation for Mario game arrays
         self.first_memory_slot = self.imported_globals_count  # 32
-        self.memory_slots = self.imported_globals_count + 32  # 64 
-        self.base_pointer = self.memory_slots  # 64
+        self.memory_slots = self.imported_globals_count + 64  # 96
+        self.base_pointer = self.memory_slots  # 96
         
-        # FIXED: Move stack much further away to avoid collision with arrays
-        # Arrays can be large (up to 100+ elements), so give plenty of space
-        self.stack_pointer = self.memory_slots + 512  # Start stack at 64 + 512 = 576
+        # FIXED: Move stack much further away for large arrays (Mario level = 384 elements)
+        self.stack_pointer = self.memory_slots + 4096  # Start at 96 + 4096 = 4192
         
-        print(f"Memory layout: globals=0-31, base_ptr={self.base_pointer}, stack_ptr={self.stack_pointer}")
+        print(f"Optimized memory: globals=0-31, base_ptr={self.base_pointer}, stack_ptr={self.stack_pointer}")
+
     
-    #def get_mem(self, address):
-    #    """Get a value from memory, handling overflow"""
-    #    if address >= 65536:
-    #        address -= 65536
-    #    return self.memory[address]
     def get_mem(self, address):
         """Get a value from memory, handling overflow"""
         if address >= 65536:
@@ -1255,6 +1249,9 @@ class UltimaUnderworldVM:
     
     def func_set_quest(self):
         """Set a quest flag value"""
+        # Pop the argument count first (this is always pushed last)
+        arg_count = self.pop()  # Should be 2
+
         ptr1 = self.pop()  # Value
         ptr2 = self.pop()  # Quest ID
         
@@ -1262,7 +1259,12 @@ class UltimaUnderworldVM:
         quest_id = self.get_mem(ptr2)
         
         print(f"SET_QUEST: Setting quest {quest_id} to {value}")
-    
+
+        # Actually set the quest flag
+        if not hasattr(self, 'quest_flags'):
+            self.quest_flags = {}
+        self.quest_flags[quest_id] = value
+
     def func_sex(self):
         """Return string based on player gender"""
         ptr1 = self.pop()  # Female string ID pointer

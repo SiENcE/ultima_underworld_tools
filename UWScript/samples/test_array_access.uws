@@ -1,0 +1,27 @@
+// Simple Array Access Test
+// Tests basic array element retrieval
+
+say "Array Access Test"
+
+// Create a simple array with known values
+let test_array = [10, 20, 30, 40, 50]
+
+say "Array contents:"
+
+// Access each element and display it
+let value0 = test_array[0]
+let value1 = test_array[1] 
+let value2 = test_array[2]
+let value3 = test_array[3]
+let value4 = test_array[4]
+
+say "test_array[0] = " + value0
+say "test_array[1] = " + value1
+say "test_array[2] = " + value2
+say "test_array[3] = " + value3
+say "test_array[4] = " + value4
+
+say "Expected: 10, 20, 30, 40, 50"
+say "Test complete!"
+
+exit

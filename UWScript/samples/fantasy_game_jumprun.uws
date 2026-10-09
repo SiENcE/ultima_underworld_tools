@@ -1,0 +1,169 @@
+// Minimal Horizontal Scrolling Jump & Run Game
+// Key codes
+let KEY_UP = 0
+let KEY_LEFT = 2
+let KEY_RIGHT = 3
+let KEY_ESCAPE = 6
+
+// Player sprite (8x8)
+let player_sprite = [
+    8, 8,
+    0, 0, 1, 1, 1, 1, 0, 0,
+    0, 1, 2, 1, 1, 2, 1, 0,
+    1, 1, 1, 3, 3, 1, 1, 1,
+    1, 1, 4, 4, 4, 4, 1, 1,
+    1, 1, 4, 4, 4, 4, 1, 1,
+    1, 1, 6, 1, 1, 6, 1, 1,
+    0, 1, 6, 1, 1, 6, 1, 0,
+    0, 0, 1, 0, 0, 1, 0, 0
+]
+
+// Ground tile (8x8)
+let ground_tile = [
+    8, 8,
+    6, 6, 6, 6, 6, 6, 6, 6,
+    6, 5, 6, 6, 6, 5, 6, 6,
+    6, 6, 6, 5, 6, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 5, 6,
+    6, 5, 6, 6, 5, 6, 6, 6,
+    6, 6, 6, 6, 6, 6, 6, 6,
+    6, 6, 5, 6, 6, 6, 6, 5,
+    6, 6, 6, 6, 6, 6, 6, 6
+]
+
+// Platform tile (8x8)
+let platform_tile = [
+    8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8,
+    8, 9, 8, 8, 8, 9, 8, 8,
+    8, 8, 8, 9, 8, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 9, 8,
+    8, 9, 8, 8, 9, 8, 8, 8,
+    8, 8, 8, 8, 8, 8, 8, 8,
+    8, 8, 9, 8, 8, 8, 8, 9,
+    8, 8, 8, 8, 8, 8, 8, 8
+]
+
+// Small level map (16x12)
+let level = [
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,2,2,2,0,0,0,2,2,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+]
+
+// Player state
+let player_x = 16
+let player_y = 64
+let player_vel_x = 0
+let player_vel_y = 0
+let on_ground = false
+let camera_x = 0
+let running = true
+
+say "Arrow keys to move, UP to jump, ESC to quit"
+
+label game_loop
+    // Input
+    player_vel_x = 0
+    
+    if is_key_pressed(KEY_LEFT)
+        player_vel_x = -2
+    endif
+    
+    if is_key_pressed(KEY_RIGHT)
+        player_vel_x = 2
+    endif
+    
+    if is_key_pressed(KEY_UP) and on_ground
+        player_vel_y = -4
+    endif
+    
+    if is_key_pressed(KEY_ESCAPE)
+        running = false
+    endif
+    
+    // Physics
+    player_x += player_vel_x
+    player_y += player_vel_y
+    player_vel_y += 1
+    
+    // Collision
+    let tile_x = player_x / 8
+    let tile_y = (player_y + 7) / 8
+    
+    on_ground = false
+    
+    if tile_x >= 0 and tile_x < 16 and tile_y >= 0 and tile_y < 12
+        let map_index = tile_y * 16 + tile_x
+        let tile_type = level[map_index]
+        
+        if tile_type > 0 and player_vel_y >= 0
+            player_y = tile_y * 8 - 8
+            player_vel_y = 0
+            on_ground = true
+        endif
+    endif
+    
+    // Bounds
+    if player_x < 0
+        player_x = 0
+    endif
+    if player_x > 120
+        player_x = 120
+    endif
+    
+    // Camera
+    camera_x = player_x - 60
+    if camera_x < 0
+        camera_x = 0
+    endif
+    if camera_x > 0
+        camera_x = 0
+    endif
+    
+    // Draw
+    clear_screen(7)
+    
+    let y = 0
+    while y < 12
+        let x = 0
+        while x < 16
+            let screen_x = x * 8 - camera_x
+            let screen_y = y * 8
+            
+            if screen_x >= -8 and screen_x < 128
+                let map_idx = y * 16 + x
+                let tile_type = level[map_idx]
+                
+                if tile_type == 1
+                    draw_sprite(screen_x, screen_y, ground_tile)
+                elseif tile_type == 2
+                    draw_sprite(screen_x, screen_y, platform_tile)
+                endif
+            endif
+            
+            x += 1
+        endwhile
+        y += 1
+    endwhile
+    
+    let player_screen_x = player_x - camera_x
+    draw_sprite(player_screen_x, player_y, player_sprite)
+    
+    flip_display()
+    
+    if running
+        goto game_loop
+    endif
+
+say "Game Over!"
+exit

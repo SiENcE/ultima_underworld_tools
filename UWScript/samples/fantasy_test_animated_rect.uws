@@ -1,0 +1,144 @@
+// Animated Rectangle Test using Arrays
+// Demonstrates dynamic rectangle manipulation
+
+// Key constants
+let KEY_UP = 0
+let KEY_DOWN = 1
+let KEY_LEFT = 2
+let KEY_RIGHT = 3
+let KEY_SPACE = 4
+let KEY_ESCAPE = 6
+
+// Moving rectangle array: [x, y, width, height, color]
+let moving_rect = [50, 50, 20, 15, 2]
+
+// Static background rectangles for collision testing
+let static_rects = [
+    // Format: [x, y, width, height, color]
+    10, 10, 30, 20, 4,    // Blue rect
+    80, 30, 25, 35, 3,    // Green rect  
+    30, 80, 40, 20, 5,    // Yellow rect
+    90, 90, 25, 25, 6     // Magenta rect
+]
+
+let num_static = 4
+let animation_frame = 0
+let move_speed = 2
+
+// Function to check if two rectangles overlap
+function rects_overlap(x1, y1, w1, h1, x2, y2, w2, h2)
+    if x1 >= x2 + w2
+        return false
+    endif
+    if x2 >= x1 + w1
+        return false  
+    endif
+    if y1 >= y2 + h2
+        return false
+    endif
+    if y2 >= y1 + h1
+        return false
+    endif
+    return true
+endfunction
+
+// Function to draw a rectangle from array
+function draw_rect_from_array(rect_array, is_filled)
+    let x = rect_array[0]
+    let y = rect_array[1] 
+    let width = rect_array[2]
+    let height = rect_array[3]
+    let color = rect_array[4]
+    
+    if is_filled
+        fill_rect(x, y, width, height, color)
+    else
+        draw_rect(x, y, width, height, color)
+    endif
+endfunction
+
+say "Animated Rectangle Test"
+say "Arrow keys to move red rectangle"
+say "SPACE to change color, ESC to exit"
+
+label game_loop
+    // Clear screen
+    clear_screen(0)
+    
+    // Handle input
+    if is_key_pressed(KEY_UP) and moving_rect[1] > 0
+        moving_rect[1] -= move_speed
+    endif
+    
+    if is_key_pressed(KEY_DOWN) and moving_rect[1] < 127 - moving_rect[3]
+        moving_rect[1] += move_speed
+    endif
+    
+    if is_key_pressed(KEY_LEFT) and moving_rect[0] > 0
+        moving_rect[0] -= move_speed
+    endif
+    
+    if is_key_pressed(KEY_RIGHT) and moving_rect[0] < 127 - moving_rect[2]
+        moving_rect[0] += move_speed
+    endif
+    
+    if is_key_pressed(KEY_SPACE)
+        // Cycle through colors 2-7
+        moving_rect[4] += 1
+        if moving_rect[4] > 7
+            moving_rect[4] = 2
+        endif
+    endif
+    
+    if is_key_pressed(KEY_ESCAPE)
+        say "Animation test complete!"
+        exit
+    endif
+    
+    // Draw static rectangles
+    let i = 0
+    while i < num_static
+        let base_index = i * 5
+        let static_x = static_rects[base_index]
+        let static_y = static_rects[base_index + 1]
+        let static_w = static_rects[base_index + 2] 
+        let static_h = static_rects[base_index + 3]
+        let static_color = static_rects[base_index + 4]
+        
+        // Check for collision with moving rectangle
+        let collision = rects_overlap(
+            moving_rect[0], moving_rect[1], moving_rect[2], moving_rect[3],
+            static_x, static_y, static_w, static_h
+        )
+        
+        if collision
+            // Draw white outline when colliding
+            draw_rect(static_x, static_y, static_w, static_h, 1)
+        else
+            // Normal filled rectangle
+            fill_rect(static_x, static_y, static_w, static_h, static_color)
+        endif
+        
+        i += 1
+    endwhile
+    
+    // Draw moving rectangle
+    draw_rect_from_array(moving_rect, true)
+    
+    // Add some animated outline effects
+    animation_frame += 1
+    let outline_color = 1
+    if animation_frame % 30 < 15
+        outline_color = 7  // Cyan
+    endif
+    
+    // Animated border
+    draw_rect(2, 2, 124, 124, outline_color)
+    
+    // Draw position info
+    fill_rect(5, 115, 60, 10, 0)  // Black background for text
+    
+    // Update display
+    flip_display()
+    
+    goto game_loop
