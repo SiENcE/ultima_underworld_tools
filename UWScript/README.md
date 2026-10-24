@@ -2,7 +2,7 @@
 
 UWScript is a higher-level programming language designed to create conversations for Ultima Underworld games. It compiles down to the assembly code understood by the original game engine and the VM runner.
 
-![UW Fantasy Console](uw_vm_console.png)
+![UW Fantasy Console](docs/uw_vm_console.png)
 
 ## Enhanced Version with Array Support
 
@@ -16,15 +16,19 @@ These features are especially useful for creating sprite data, managing dialogue
 
 ## Installation
 
-1. Place the `uwscript_compiler_enhanced.py` file in your project directory
-2. Ensure you have Python 3.6 or newer installed
+1. Ensure you have Python 3.6 or newer installed
+2. The compiler (`uwscript_compiler.py`) only needs the standard library. For the fantasy console, install its dependencies:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Usage
 
 Create UWScript files with the `.uws` extension, then compile them using:
 
 ```bash
-python uwscript_compiler_enhanced.py input.uws -o output.asm -b 1
+python uwscript_compiler.py input.uws -o output.asm -b 1
 ```
 
 Where:

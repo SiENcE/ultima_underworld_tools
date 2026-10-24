@@ -6,8 +6,8 @@ This unittest suite verifies whether the 6 major critical bugs have been fixed.
 Tests will FAIL if bugs are still present and PASS if bugs are fixed.
 
 Usage:
-    python -m unittest uwscript_bug_unittest.py -v
-    python uwscript_bug_unittest.py  # Run directly
+    python -m unittest uwscript_compiler_bug_unittest -v
+    python uwscript_compiler_bug_unittest.py  # Run directly
 """
 
 import unittest

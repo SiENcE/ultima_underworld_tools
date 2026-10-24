@@ -14,13 +14,13 @@ The enhanced version includes:
 ## How to Use
 
 1. Create the necessary files:
-   - `fantasy_console_enhanced.py`: The enhanced fantasy console implementation
+   - `fantasy_console.py`: The enhanced fantasy console implementation
    - `demo.asm`: Your program in assembly format
    - `strings.txt`: The strings for your program
 
 2. Run the fantasy console:
    ```
-   python fantasy_console_enhanced.py demo.asm --strings strings.txt
+   python fantasy_console.py demo.asm --strings strings.txt
    ```
 
 3. Controls:
@@ -141,7 +141,7 @@ exit
 
 Enable debug mode to see instruction execution:
 ```bash
-python fantasy_console_enhanced.py program.asm --debug
+python fantasy_console.py program.asm --debug
 ```
 
 Look for patterns like:

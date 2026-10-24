@@ -1,8 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Original game data (copyrighted - never commit)
+*.ARK
+*.ARK_*
+*.PAK
+*.PAK_*
+*.ark
+*.pak
+
+# Generated output / local working files
+/conversation_*.asm
+/conversation_*.bin
+/conversation_*.txt
+/uw-strings*.txt
+/uw-strings-metadata.json
+strings-analysis.json
 cnv/
+conversations/
+UWScript/output.asm
+UWScript/*_strings.txt
+
+# Local work in progress
 alt/
 UWScript/samples_wrong/
 UWScript/tests/
-UWScript/__pycache__/
 UWScript/html_console/
-__pycache__/
-!111111111/

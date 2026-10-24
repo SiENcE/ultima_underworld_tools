@@ -1,0 +1,11 @@
+# uw-strings-translator.py - install the backend you want to use.
+# The other string tools only need the Python standard library.
+
+# Backend "ollama" (also requires a running Ollama server: https://ollama.com)
+ollama
+
+# Backend "transformers"
+transformers
+torch
+datasets
+sentencepiece  # needed by Helsinki-NLP/opus-mt-* models

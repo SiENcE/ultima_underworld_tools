@@ -60,16 +60,16 @@
 
 ```bash
 # Run all tests with verbose output
-python -m unittest uwscript_bug_unittest.py -v
+python -m unittest uwscript_compiler_bug_unittest -v
 
 # Run directly with custom output
-python uwscript_bug_unittest.py
+python uwscript_compiler_bug_unittest.py
 
 # Run specific bug test
-python -m unittest uwscript_bug_unittest.TestBug2MemoryCollision -v
+python -m unittest uwscript_compiler_bug_unittest.TestBug2MemoryCollision -v
 
 # Run just the integration test
-python -m unittest uwscript_bug_unittest.TestIntegrationAllFixes -v
+python -m unittest uwscript_compiler_bug_unittest.TestIntegrationAllFixes -v
 ```
 
 ## **Expected Results:**

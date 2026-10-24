@@ -326,7 +326,7 @@ label animate
 
 Enable debug mode to see detailed execution:
 ```bash
-python fantasy_console_enhanced.py program.asm --debug
+python fantasy_console.py program.asm --debug
 ```
 
 This will show:

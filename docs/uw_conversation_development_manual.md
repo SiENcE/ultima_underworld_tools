@@ -456,12 +456,12 @@ For each function call:
 
 1. **Explore existing conversations**:
    ```bash
-   python uw_cnv_decompiler.py CNV.ARK -o extracted
+   python conversation_tools/uw_cnv_decompiler.py CNV.ARK -o extracted
    ```
 
 2. **Extract string blocks**:
    ```bash
-   python uw-strings-extractor.py
+   python string_tools/uw-strings-extractor.py
    ```
    This creates `uw-strings.txt` and `uw-strings-metadata.json`
 
@@ -481,22 +481,22 @@ For each function call:
 
 5. **Test conversation**:
    ```bash
-   python uw_cnv_runner.py my_conversation.asm --strings uw-strings.txt
+   python conversation_tools/uw_cnv_runner.py my_conversation.asm --strings uw-strings.txt
    ```
 
 6. **Compile conversation**:
    ```bash
-   python uw_cnv_compiler.py my_conversation.asm
+   python conversation_tools/uw_cnv_compiler.py my_conversation.asm
    ```
 
 7. **Update game files**:
    - Separately or with direct CNV.ARK update:
    ```bash
-   python uw_cnv_compiler.py my_conversation.asm --update-cnv CNV.ARK
+   python conversation_tools/uw_cnv_compiler.py my_conversation.asm --update-cnv CNV.ARK
    ```
    - For strings:
    ```bash
-   python uw-strings-packer.py
+   python string_tools/uw-strings-packer.py
    ```
 
 ### Advanced: Translation Workflow
@@ -506,7 +506,7 @@ For creating translations:
 1. Extract strings using the extractor
 2. Use the translator tool:
    ```bash
-   python uw-strings-translator.py uw-strings.txt uw-strings-de.txt --source English --target German
+   python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-de.txt --source English --target German
    ```
 3. Pack the translated strings with the packer
 
@@ -880,7 +880,7 @@ block: 0066; 11 strings.
 
 1. Use the runner with debug mode to trace execution:
    ```bash
-   python uw_cnv_runner.py my_conversation.asm --strings uw-strings.txt --debug
+   python conversation_tools/uw_cnv_runner.py my_conversation.asm --strings uw-strings.txt --debug
    ```
 
 2. Test incrementally - add small sections and test frequently
@@ -901,14 +901,14 @@ Analyzes STRINGS.PAK structure, showing:
 - Sample string encodings
 
 ```bash
-python uw-strings-analyzer.py strings.pak [--hexdump offset length]
+python string_tools/uw-strings-analyzer.py strings.pak [--hexdump offset length]
 ```
 
 ### uw-strings-extractor.py
 
 Extracts all strings to a text file:
 ```bash
-python uw-strings-extractor.py
+python string_tools/uw-strings-extractor.py
 ```
 
 Outputs:
@@ -919,7 +919,7 @@ Outputs:
 
 Creates a new STRINGS.PAK from extracted files:
 ```bash
-python uw-strings-packer.py
+python string_tools/uw-strings-packer.py
 ```
 
 Requirements:
@@ -930,7 +930,7 @@ Requirements:
 
 Translates string blocks:
 ```bash
-python uw-strings-translator.py uw-strings.txt uw-strings-de.txt --source English --target German
+python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-de.txt --source English --target German
 ```
 
 Options:
@@ -943,12 +943,12 @@ Options:
 
 Extracts and decompiles conversations:
 ```bash
-python uw_cnv_decompiler.py CNV.ARK -o output_dir
+python conversation_tools/uw_cnv_decompiler.py CNV.ARK -o output_dir
 ```
 
 For a single binary:
 ```bash
-python uw_cnv_decompiler.py conversation_bin --decompile-binary
+python conversation_tools/uw_cnv_decompiler.py conversation_bin --decompile-binary
 ```
 
 Outputs:
@@ -960,19 +960,19 @@ Outputs:
 
 Compiles ASM to binary:
 ```bash
-python uw_cnv_compiler.py conversation.asm -o output.bin
+python conversation_tools/uw_cnv_compiler.py conversation.asm -o output.bin
 ```
 
 Update CNV.ARK directly:
 ```bash
-python uw_cnv_compiler.py conversation.asm --update-cnv CNV.ARK
+python conversation_tools/uw_cnv_compiler.py conversation.asm --update-cnv CNV.ARK
 ```
 
 ### uw_cnv_runner.py
 
 Tests conversations without the game:
 ```bash
-python uw_cnv_runner.py conversation.asm --strings uw-strings.txt
+python conversation_tools/uw_cnv_runner.py conversation.asm --strings uw-strings.txt
 ```
 
 Options:
