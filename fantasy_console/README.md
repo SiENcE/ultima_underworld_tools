@@ -1,5 +1,7 @@
 # FantasyUW: A Fantasy Console Based on Ultima Underworld VM
 
+![UW Fantasy Console](docs/uw_vm_console.png)
+
 FantasyUW is a fantasy console based on the Ultima Underworld VM, extending it with graphics, input, and sound capabilities while maintaining the core stack-based architecture.
 
 ## Enhanced Version Features
@@ -11,17 +13,28 @@ The enhanced version includes:
 - **Sound Generation**: Basic tone generation
 - **Key Release Detection**: Detect when keys are released in addition to presses
 
+## Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+The console imports the VM (`uw_cnv_runner.py`) and the compiler (`uwscript_compiler.py`) from [`../uwscript`](../uwscript/README.md), so keep the two folders side by side.
+
 ## How to Use
 
-1. Create the necessary files:
-   - `fantasy_console.py`: The enhanced fantasy console implementation
-   - `demo.asm`: Your program in assembly format
-   - `strings.txt`: The strings for your program
+1. Write your program in [UWScript](../uwscript/README.md) (see `samples/`), or directly in UW assembly.
 
-2. Run the fantasy console:
+2. Compile and run it in one step (Windows):
    ```
-   python fantasy_console.py demo.asm --strings strings.txt
+   start.bat samples\fantasy_pong.uws
    ```
+   or do it manually:
+   ```
+   python ../uwscript/uwscript_compiler.py samples/fantasy_pong.uws -o output.asm -s uw-strings.txt
+   python fantasy_console.py output.asm --strings uw-strings.txt
+   ```
+   `standalone_jumprun.py` is a self-contained example that compiles and runs an embedded game.
 
 3. Controls:
    - Arrow keys: Move the rectangle
@@ -351,3 +364,77 @@ The modular design makes it easy to add new functions through the `imported_func
 5. **Math**:
    - Add more advanced math functions
    - Implement collision detection
+
+## Example: Drawing with Arrays
+
+Here's an example using arrays to create and draw a simple sprite:
+
+```
+// Define colors
+let BLACK = 0
+let WHITE = 1
+let RED = 2
+let GREEN = 3
+let BLUE = 4
+
+// Create a simple face sprite (8x8)
+let face_sprite = [
+    8, 8,  // Width, Height
+    0, 0, 1, 1, 1, 1, 0, 0,  // Row 1
+    0, 1, 0, 0, 0, 0, 1, 0,  // Row 2
+    1, 0, 1, 0, 1, 0, 0, 1,  // Row 3
+    1, 0, 0, 0, 0, 0, 0, 1,  // Row 4
+    1, 0, 1, 0, 0, 1, 0, 1,  // Row 5
+    1, 0, 0, 1, 1, 0, 0, 1,  // Row 6
+    0, 1, 0, 0, 0, 0, 1, 0,  // Row 7
+    0, 0, 1, 1, 1, 1, 0, 0   // Row 8
+]
+
+// Main program
+clear_screen(BLACK)
+let x = 60
+let y = 60
+
+// Game loop
+label game_loop
+    // Clear screen each frame
+    clear_screen(BLACK)
+    
+    // Draw the sprite
+    draw_sprite(x, y, face_sprite)
+    
+    // Update position based on input
+    if is_key_pressed(KEY_LEFT)
+        x -= 1
+    endif
+    if is_key_pressed(KEY_RIGHT)
+        x += 1
+    endif
+    if is_key_pressed(KEY_UP)
+        y -= 1
+    endif
+    if is_key_pressed(KEY_DOWN)
+        y += 1
+    endif
+    
+    // Exit on ESCAPE
+    if is_key_pressed(KEY_ESCAPE)
+        goto game_end
+    endif
+    
+    // Update display
+    flip_display()
+    
+    // Continue loop
+    goto game_loop
+
+label game_end
+say "Goodbye!"
+exit
+```
+
+## Further Reading
+
+- [docs/sprite_usage_guide.md](docs/sprite_usage_guide.md) - Sprite system guide
+- [docs/fantasy_console_concept.md](docs/fantasy_console_concept.md) - Design concept
+- [samples/fantasy_game_astro_wars_readme.md](samples/fantasy_game_astro_wars_readme.md) - Walkthrough of a complete game

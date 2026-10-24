@@ -184,12 +184,14 @@ def compile_and_run():
     
     # Check if we can import the required modules
     try:
-        sys.path.insert(0, '.')  # Add current directory to path
+        here = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, here)
+        sys.path.insert(0, os.path.join(here, '..', 'uwscript'))
         from uwscript_compiler import compile_uwscript
         from fantasy_console import FantasyConsole
     except ImportError as e:
         print(f"Error: Could not import required modules: {e}")
-        print("Make sure uwscript_compiler.py and fantasy_console.py are in the same directory")
+        print("Make sure fantasy_console.py is next to this script and uwscript_compiler.py is in ../uwscript")
         return False
     
     print("=== FantasyUW Jump & Run Game ===")

@@ -5,6 +5,9 @@ import sys
 import os
 import argparse
 import time
+
+# The VM and the UWScript compiler live in ../uwscript
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uwscript'))
 from uw_cnv_runner import UltimaUnderworldVM
 
 class FantasyConsole(UltimaUnderworldVM):

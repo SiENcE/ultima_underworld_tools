@@ -2,8 +2,6 @@
 
 UWScript is a higher-level programming language designed to create conversations for Ultima Underworld games. It compiles down to the assembly code understood by the original game engine and the VM runner.
 
-![UW Fantasy Console](docs/uw_vm_console.png)
-
 ## Enhanced Version with Array Support
 
 The enhanced version adds powerful array capabilities to UWScript:
@@ -16,12 +14,7 @@ These features are especially useful for creating sprite data, managing dialogue
 
 ## Installation
 
-1. Ensure you have Python 3.6 or newer installed
-2. The compiler (`uwscript_compiler.py`) only needs the standard library. For the fantasy console, install its dependencies:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
+Requires Python 3.6 or newer. The compiler (`uwscript_compiler.py`) and the VM (`uw_cnv_runner.py`) only use the standard library.
 
 ## Usage
 
@@ -34,11 +27,27 @@ python uwscript_compiler.py input.uws -o output.asm -b 1
 Where:
 - `input.uws` is your UWScript source file
 - `output.asm` is the generated assembly file
+- `-s strings.txt` sets the generated strings file (default: `input_strings.txt`)
 - `-b 1` specifies the string block ID to use (default is 1)
 - Add `-v` for verbose output
 - Add `--debug` for detailed compiler debug information
 
-The compiled assembly file can then be used with the UW conversation VM or the fantasy console.
+The compiled assembly file can then be run with the VM in this folder:
+
+```bash
+python uw_cnv_runner.py output.asm --strings input_strings.txt
+```
+
+or on the [fantasy console](../fantasy_console/README.md).
+
+## Folder Contents
+
+- `uwscript_compiler.py` - UWScript to UW assembly compiler
+- `uw_cnv_runner.py` - Conversation VM matching the compiler's output (also the base of the fantasy console). It has diverged from `tools/conversations/uw_cnv_runner.py`, so keep using this copy for UWScript.
+- `uwscript_compiler_bug_unittest.py` - Regression tests (see `uwscript_compiler_bug_unittest.md`)
+- `samples/` - Example UWScript programs
+- `docs/uwscript-language-spec.md` - Full language specification
+- `docs/UWScript_udl.xml` - Notepad++ syntax highlighting for `.uws` files
 
 ## Language Features
 
@@ -205,73 +214,7 @@ draw_line(10, 10, 50, 50, 2)  // Draw red line
 draw_sprite(20, 30, my_sprite)  // Draw sprite from array
 ```
 
-## Example: Drawing with Arrays
-
-Here's an example using arrays to create and draw a simple sprite:
-
-```
-// Define colors
-let BLACK = 0
-let WHITE = 1
-let RED = 2
-let GREEN = 3
-let BLUE = 4
-
-// Create a simple face sprite (8x8)
-let face_sprite = [
-    8, 8,  // Width, Height
-    0, 0, 1, 1, 1, 1, 0, 0,  // Row 1
-    0, 1, 0, 0, 0, 0, 1, 0,  // Row 2
-    1, 0, 1, 0, 1, 0, 0, 1,  // Row 3
-    1, 0, 0, 0, 0, 0, 0, 1,  // Row 4
-    1, 0, 1, 0, 0, 1, 0, 1,  // Row 5
-    1, 0, 0, 1, 1, 0, 0, 1,  // Row 6
-    0, 1, 0, 0, 0, 0, 1, 0,  // Row 7
-    0, 0, 1, 1, 1, 1, 0, 0   // Row 8
-]
-
-// Main program
-clear_screen(BLACK)
-let x = 60
-let y = 60
-
-// Game loop
-label game_loop
-    // Clear screen each frame
-    clear_screen(BLACK)
-    
-    // Draw the sprite
-    draw_sprite(x, y, face_sprite)
-    
-    // Update position based on input
-    if is_key_pressed(KEY_LEFT)
-        x -= 1
-    endif
-    if is_key_pressed(KEY_RIGHT)
-        x += 1
-    endif
-    if is_key_pressed(KEY_UP)
-        y -= 1
-    endif
-    if is_key_pressed(KEY_DOWN)
-        y += 1
-    endif
-    
-    // Exit on ESCAPE
-    if is_key_pressed(KEY_ESCAPE)
-        goto game_end
-    endif
-    
-    // Update display
-    flip_display()
-    
-    // Continue loop
-    goto game_loop
-
-label game_end
-say "Goodbye!"
-exit
-```
+The fantasy console functions only work when running on the [fantasy console](../fantasy_console/README.md).
 
 ## Tips for Avoiding Compiler Issues
 

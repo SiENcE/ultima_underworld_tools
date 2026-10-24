@@ -23,7 +23,7 @@ This translator tool processes extracted `uw-strings.txt` files from Ultima Unde
 ### Basic Dependencies
 
 ```bash
-pip install -r string_tools/requirements-translator.txt
+pip install -r tools/strings/requirements-translator.txt
 ```
 
 ### Optional Dependencies
@@ -45,55 +45,55 @@ For Ollama backend:
 ### Basic Usage
 
 ```bash
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --source English --target German --backend ollama
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --source English --target German --backend ollama
 ```
 
 ### Using Transformers Backend
 
 ```bash
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend transformers
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend transformers
 ```
 
 ### For Memory-Constrained Systems (6GB VRAM or less)
 
 ```bash
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend transformers --low-memory --batch-size 4 --chunk-size 20
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend transformers --low-memory --batch-size 4 --chunk-size 20
 ```
 
 ### For CPU-Only Processing
 
 ```bash
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend transformers --cpu
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend transformers --cpu
 ```
 
 ### With Contextual Translation (for better quality)
 
 ```bash
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend ollama --context
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend ollama --context
 ```
 
 ### Translation Validation (to prevent lengthy translations)
 
 ```bash
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend ollama --validate --max-ratio 2.0
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend ollama --validate --max-ratio 2.0
 ```
 
 ### Preserve Special Terms
 
 ```bash
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --preserve-special-chars "X_$"
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --preserve-special-chars "X_$"
 ```
 
 ### German Umlaut Handling
 
 ```bash
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --target German --handle-umlauts ascii
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --target German --handle-umlauts ascii
 ```
 
 ### Test Mode (translate only first block)
 
 ```bash
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend ollama --test
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend ollama --test
 ```
 
 ### Processing a Limited Number of Blocks
@@ -101,17 +101,17 @@ python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translate
 This is useful for testing or when dividing work across multiple runs:
 
 ```bash
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend transformers --blocks 20
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend transformers --blocks 20
 ```
 
 ### Using a Specific Model
 
 ```bash
 # With Ollama backend
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend ollama --model llama3:8b
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend ollama --model llama3:8b
 
 # With Transformers backend
-python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend transformers --model Helsinki-NLP/opus-mt-en-de
+python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-translated.txt --backend transformers --model Helsinki-NLP/opus-mt-en-de
 ```
 
 ## Command-Line Options
@@ -185,7 +185,7 @@ If you have limited GPU memory (6GB VRAM or less):
 3. Process the file in blocks:
    ```bash
    # First run - first 50 blocks
-   python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-part1.txt --blocks 50
+   python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-part1.txt --blocks 50
    
    # Second run - next 50 blocks
    # (Modify the script to start from block 51, or create a version that supports offset)
@@ -222,9 +222,9 @@ This helps prevent issues with text overflow in game UI elements that have fixed
 
 ## Workflow
 
-1. Extract strings from STRINGS.PAK using `string_tools/uw-strings-extractor.py`
+1. Extract strings from STRINGS.PAK using `tools/strings/uw-strings-extractor.py`
 2. Translate the extracted strings using this tool
-3. Pack the translated strings back using `string_tools/uw-strings-packer.py`
+3. Pack the translated strings back using `tools/strings/uw-strings-packer.py`
 
 ## Troubleshooting
 
@@ -266,17 +266,17 @@ For highest quality translations, consider a multi-stage approach:
 
 1. Initial machine translation:
    ```bash
-   python string_tools/uw-strings-translator.py uw-strings.txt uw-strings-draft.txt --backend transformers
+   python tools/strings/uw-strings-translator.py uw-strings.txt uw-strings-draft.txt --backend transformers
    ```
 
 2. Refinement with context-aware LLM:
    ```bash
-   python string_tools/uw-strings-translator.py uw-strings-draft.txt uw-strings-final.txt --backend ollama --context
+   python tools/strings/uw-strings-translator.py uw-strings-draft.txt uw-strings-final.txt --backend ollama --context
    ```
 
 3. Validation and length checking:
    ```bash
-   python string_tools/uw-strings-translator.py uw-strings-final.txt uw-strings-validated.txt --validate --use-original-if-too-long
+   python tools/strings/uw-strings-translator.py uw-strings-final.txt uw-strings-validated.txt --validate --use-original-if-too-long
    ```
 
 ### Language Code Reference
@@ -298,7 +298,7 @@ The tool will attempt to convert full language names to codes automatically.
 After completing translation, use the packer to create a new STRINGS.PAK file:
 
 ```bash
-python string_tools/uw-strings-packer.py
+python tools/strings/uw-strings-packer.py
 ```
 
 Make sure to back up your original STRINGS.PAK file before replacing it!

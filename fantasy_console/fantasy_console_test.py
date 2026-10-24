@@ -5,6 +5,9 @@ import pygame
 import os
 import sys
 import tempfile
+
+# The VM and the UWScript compiler live in ../uwscript
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uwscript'))
 from fantasy_console import FantasyConsole
 from uwscript_compiler import compile_uwscript
 

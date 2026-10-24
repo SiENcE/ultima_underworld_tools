@@ -25,13 +25,15 @@ Thumbs.db
 /uw-strings*.txt
 /uw-strings-metadata.json
 strings-analysis.json
-cnv/
-conversations/
-UWScript/output.asm
-UWScript/*_strings.txt
+/cnv/
+/conversations/
+fantasy_console/output.asm
+*_strings.txt
+fantasy_console/uw-strings.txt
 
 # Local work in progress
-alt/
-UWScript/samples_wrong/
-UWScript/tests/
-UWScript/html_console/
+/alt/
+uwscript/tests/
+fantasy_console/tests/
+fantasy_console/samples_wrong/
+fantasy_console/html_console/
