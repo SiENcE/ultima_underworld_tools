@@ -8,7 +8,7 @@ import time
 
 # The VM and the UWScript compiler live in ../uwscript
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uwscript'))
-from uw_cnv_runner import UltimaUnderworldVM
+from uwscript_vm import UltimaUnderworldVM, load_program
 
 class FantasyConsole(UltimaUnderworldVM):
     """Fantasy console based on the Ultima Underworld VM"""
@@ -786,34 +786,31 @@ class FantasyConsole(UltimaUnderworldVM):
 def main():
     """Main function to run the FantasyUW console"""
     parser = argparse.ArgumentParser(description='FantasyUW Console')
-    parser.add_argument('program', help='Path to assembly program')
-    parser.add_argument('--strings', help='Path to the string block file', default='uw-strings.txt')
+    parser.add_argument('program', help='program to run: assembly (.asm) or UWScript source (.uws)')
+    parser.add_argument('--strings', help='string block file (default: <program>_strings.txt)')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     parser.add_argument('--fps', type=int, help='Target frames per second', default=30)
+    parser.add_argument('--profile', action='store_true', help='Print an instruction profile before running')
     args = parser.parse_args()
     
     if not os.path.exists(args.program):
         print(f"Error: Program file '{args.program}' not found")
-        return
+        return 1
     
     print("=== FantasyUW Console ===")
     
     # Create console
     console = FantasyConsole(debug=args.debug)
-    console.profile_vm_performance()  # Before loading
     console.fps = args.fps
     console.frame_delay = 1.0 / args.fps
     
-    # Load strings if available
-    if args.strings and os.path.exists(args.strings):
-        console.load_string_blocks(args.strings)
-    else:
-        print(f"Warning: String file '{args.strings}' not found")
-    
-    # Load assembly directly
-    if not console.parse_asm(args.program):
-        print("Error parsing assembly")
-        return
+    # Load (or compile) the program and its strings
+    error = load_program(console, args.program, args.strings)
+    if error:
+        print(f"Error: {error}")
+        return 1
+    if args.profile:
+        console.profile_vm_performance()
     
     # Initialize memory
     console.initialize_memory()
@@ -825,8 +822,10 @@ def main():
         print(f"Error during execution: {e}")
         import traceback
         traceback.print_exc()
+        return 1
     
     print("Program execution complete")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,4 +1,5 @@
-// Riddle Master - Compatible version
+// Conversation: the Riddle Master asks riddles in a function with a parameter,
+// reads typed answers with ask and stores progress in quest flags
 let met_master = get_quest(20)
 let riddles_solved = get_quest(21)
 let reward_given = get_quest(22)

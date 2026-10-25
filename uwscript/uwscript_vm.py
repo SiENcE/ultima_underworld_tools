@@ -1,14 +1,38 @@
+#!/usr/bin/env python3
+"""
+UWScript VM: runs Ultima Underworld conversation assembly in the terminal.
+
+    python uwscript_vm.py program.asm                  # strings from program_strings.txt
+    python uwscript_vm.py program.uws                  # compile and run in one step
+    python uwscript_vm.py program.asm --strings other_strings.txt --quest 5=1
+
+It follows the calling convention of the original engine for imported
+functions (CALLI): arguments stay on the stack for the caller to pop and the
+result is read with PUSH_REG. The fantasy console (../fantasy_console) is
+built on this VM.
+"""
+
 import argparse
 import os
 import random
+import re
+import sys
+
+
+class VMError(Exception):
+    """A runtime error in the conversation program."""
+
 
 class UltimaUnderworldVM:
     """Virtual Machine for Ultima Underworld Conversations"""
-    
+
+    # Nesting depth for text substitutions that insert other templates
+    MAX_SUBSTITUTION_DEPTH = 8
+
     def __init__(self, debug=False):
         # Memory model
         self.memory = [0] * 65536  # Full 16-bit address space (64K)
-        self.stack = []            # Stack storage (primarily for tracking)
+        self.stack_base = 0        # Initial stack pointer (see the stack property)
         self.stack_pointer = 0     # Stack pointer
         self.base_pointer = 0      # Base/frame pointer  
         self.result_register = 0   # Result register for imported functions
@@ -34,6 +58,10 @@ class UltimaUnderworldVM:
         
         # Debug mode
         self.debug = debug
+
+        # Quest flags (get_quest/set_quest) and scripted answers for menus/ask
+        self.quest_flags = {}
+        self.input_func = input
         
         # Initialize opcode handlers
         self.init_opcode_handlers()
@@ -138,80 +166,99 @@ class UltimaUnderworldVM:
         """Load multiple string blocks from file"""
         try:
             with open(filename, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
+                text = f.read()
+        except OSError as e:
+            print(f"Error loading string blocks: {e}")
+            return False
+        return self.load_string_blocks_text(text)
+
+    def load_string_blocks_text(self, text):
+        """Load string blocks from the text of a strings file"""
+        try:
+            lines = text.splitlines(keepends=True)
             
             current_block_id = None
             current_block = []
             
-            for line in lines:
-                line = line.strip()
-                
+            for raw_line in lines:
+                line = raw_line.strip()
+
                 # Check for block header
                 if line.startswith("block:"):
                     # Save previous block if exists
                     if current_block_id is not None and current_block:
                         self.string_blocks[current_block_id] = current_block
-                    
-                    # Parse new block header
+
+                    # Parse new block header; block ids are hex (like 0f0c)
                     parts = line.split(";")[0].strip()
-                    current_block_id = parts.split(":")[1].strip()
-                    if current_block_id.startswith("0"):
-                        # Convert from hex (like 0f0c) to decimal
-                        current_block_id = int(current_block_id, 16)
-                    else:
-                        current_block_id = int(current_block_id)
-                    
+                    current_block_id = int(parts.split(":")[1].strip(), 16)
+
                     current_block = ['']  # Initialize with empty string at index 0
-                    
-                    if self.debug:
-                        print(f"Found string block: {current_block_id}")
+
+                    self.log(f"Found string block: {current_block_id}")
                     continue
-                
-                # Process string entry
+
+                # Process string entry ("<index>: <text>"); keep trailing spaces
                 if current_block_id is not None and ":" in line:
-                    parts = line.split(":", 1)
-                    if parts[0].strip().isdigit():
-                        idx = int(parts[0].strip())
-                        text = parts[1].strip()
-                        
+                    index_part, text = raw_line.rstrip('\r\n').split(":", 1)
+                    if index_part.strip().isdigit():
+                        idx = int(index_part.strip())
+                        if text.startswith(' '):
+                            text = text[1:]
+
                         # Extend the block if needed
                         while len(current_block) <= idx:
                             current_block.append('')
-                        
-                        current_block[idx] = text
-            
+
+                        current_block[idx] = self.unescape_string(text)
+
             # Save the last block
             if current_block_id is not None and current_block:
                 self.string_blocks[current_block_id] = current_block
-                
-            print(f"Loaded {len(self.string_blocks)} string blocks")
-            
+
+            self.log(f"Loaded {len(self.string_blocks)} string blocks")
+            return True
+
         except Exception as e:
             print(f"Error loading string blocks: {e}")
-            import traceback
-            traceback.print_exc()
-    
+            if self.debug:
+                import traceback
+                traceback.print_exc()
+            return False
+
+    @staticmethod
+    def unescape_string(text):
+        """Turn \\n, \\t and \\\\ in string files into the real characters"""
+        return re.sub(r'\\([nt\\])', lambda m: {'n': '\n', 't': '\t', '\\': '\\'}[m.group(1)], text)
+
     def set_string_block(self, block_id):
         """Set the active string block"""
         if block_id in self.string_blocks:
             self.current_string_block = self.string_blocks[block_id]
             self.string_block_id = block_id
-            print(f"Using string block: {block_id} with {len(self.current_string_block)} strings")
+            self.log(f"Using string block: {block_id} with {len(self.current_string_block)} strings")
             return True
         else:
             print(f"String block {block_id} not found")
             return False
-    
-    def process_text_substitutions(self, text):
+
+    def process_text_substitutions(self, text, depth=0):
         """
         Process UW text substitutions in a string.
         
         Format: @XY<num>
         X: G=global, S=stack, P=pointer
-        Y: S=string, I=integer  
+        Y: S=string, I=integer
+
+        A substituted string may itself contain substitutions (UWScript
+        builds strings that way); those are expanded up to
+        MAX_SUBSTITUTION_DEPTH levels.
         """
-        import re
-        
+        def get_text(string_id):
+            if depth + 1 >= self.MAX_SUBSTITUTION_DEPTH:
+                return self.get_string_raw(string_id)
+            return self.get_string(string_id, depth + 1)
+
         def substitute_match(match):
             full_match = match.group(0)
             source = match.group(1)  # G, S, or P
@@ -227,7 +274,7 @@ class UltimaUnderworldVM:
                     if type_char == 'I':
                         return str(value)
                     elif type_char == 'S':
-                        return self.get_string_raw(value)
+                        return get_text(value)
                         
                 elif source == 'G':  # Game global
                     # Game globals are at the start of memory
@@ -236,7 +283,7 @@ class UltimaUnderworldVM:
                     if type_char == 'I':
                         return str(value)
                     elif type_char == 'S':
-                        return self.get_string_raw(value)
+                        return get_text(value)
                         
                 elif source == 'P':  # Pointer variable
                     # Pointer variables point to memory addresses
@@ -247,7 +294,7 @@ class UltimaUnderworldVM:
                     if type_char == 'I':
                         return str(value)
                     elif type_char == 'S':
-                        return self.get_string_raw(value)
+                        return get_text(value)
                         
             except Exception as e:
                 self.log(f"Error processing substitution {full_match}: {e}")
@@ -269,7 +316,7 @@ class UltimaUnderworldVM:
         else:
             return f"[Invalid string ID: {string_id}]"
 
-    def get_string(self, string_id):
+    def get_string(self, string_id, depth=0):
         """Get a string from the current string block with text substitution processing"""
         if not self.current_string_block:
             return f"[No string block loaded]"
@@ -277,7 +324,7 @@ class UltimaUnderworldVM:
         if 0 <= string_id < len(self.current_string_block):
             raw_string = self.current_string_block[string_id]
             # Process text substitutions
-            return self.process_text_substitutions(raw_string)
+            return self.process_text_substitutions(raw_string, depth)
         else:
             return f"[Invalid string ID: {string_id}]"
     
@@ -301,139 +348,94 @@ class UltimaUnderworldVM:
                 return target_pos
         
         # Try hex values
-        if arg_str.startswith('0x'):
-            try:
-                return int(arg_str, 16)
-            except ValueError:
-                print(f"Warning: Invalid hex value '{arg_str}', using 0")
-                return 0
-        
-        # Try decimal values
         try:
+            if arg_str.lower().startswith(('0x', '-0x')):
+                return int(arg_str, 16)
             return int(arg_str)
         except ValueError:
-            # If we get here, it's an invalid argument
-            print(f"Warning: Unknown label or invalid number '{arg_str}', using 0")
-            return 0
+            raise VMError(f"Unknown label or invalid number '{arg_str}'")
     
     def parse_asm(self, filename):
-        """Parse the ASM file into executable code"""
+        """Parse an ASM file into executable code"""
         try:
             with open(filename, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            # Extract string literals from assembly code comments
-            self.string_literals = []
-            for line in lines:
-                if line.strip().startswith("; ") and ": \"" in line:
-                    try:
-                        # Extract string literal from comment
-                        parts = line.split(": \"")
-                        if len(parts) > 1:
-                            string_literal = parts[1].strip("\"\n")
-                            self.string_literals.append(string_literal)
-                    except:
-                        pass
-            
-            # Extract metadata from comments
-            for line in lines[:20]:  # Check first few lines for metadata
-                line = line.strip()
-                if "; Slot:" in line:
-                    slot_str = line.split('Slot:')[1].strip()
-                    if slot_str.startswith("0x"):
-                        self.slot_idx = int(slot_str, 16)
-                    elif "0" <= slot_str[0] <= "9":
-                        self.slot_idx = int(slot_str, 16) if slot_str.startswith("0") else int(slot_str)
-                    self.log(f"Found slot ID: 0x{self.slot_idx:04X}")
-                    
-                elif "; String Block:" in line:
-                    block_str = line.split('String Block:')[1].strip()
-                    self.string_block = int(block_str)
-                    self.log(f"Found string block: {self.string_block}")
-                    self.set_string_block(self.string_block)
-            
-            # First pass to identify labels
-            self.labels = {}
-            pc = 0
-            for line in lines:
-                line = line.strip()
-                # Skip comments and empty lines
-                if not line.strip() or line.strip().startswith(';'):
-                    continue
-                    
-                if ':' in line and not line.startswith(';'):
-                    # This is a label definition
-                    label = line.split(':')[0].strip()
-                    self.labels[label] = pc
-                    self.log(f"Found label '{label}' at position {pc}")
-                elif not line.startswith(';'):
-                    # This is an instruction
-                    if ' ' in line:
-                        # Opcode with argument
-                        pc += 2
-                    else:
-                        # Single opcode
-                        pc += 1
-            
-            self.log(f"Identified {len(self.labels)} labels: {self.labels}")
-            
-            # Second pass to load the code
-            self.code = []
-            pc = 0
-            for line in lines:
-                line = line.strip()
-                
-                # Skip comments and empty lines
-                if not line.strip() or line.strip().startswith(';'):
-                    continue
-                    
-                # Skip label definitions
-                if ':' in line and not line.startswith(';'):
-                    continue
-                    
-                # Parse the instruction
-                if ' ' in line:
-                    # Opcode with argument
-                    parts = line.split(' ', 1)
-                    opcode_name = parts[0].strip().upper()
-                    arg_str = parts[1].strip()
-                    
-                    # Handle special cases with comments
-                    if ';' in arg_str:
-                        arg_str = arg_str.split(';')[0].strip()
-                    
-                    # Get opcode value
-                    opcode_val = self.get_opcode(opcode_name)
-                    
-                    # Parse the argument - handle symbolic labels
-                    arg_val = self._resolve_argument(arg_str, opcode_name, pc)
-                    
-                    # Add to code
-                    self.code.append(opcode_val)
-                    self.code.append(arg_val)
-                    
-                    self.log(f"Instruction at {pc}: {opcode_name} {arg_val}")
-                    pc += 2
-                else:
-                    # Single opcode
-                    opcode_name = line.upper()
-                    opcode_val = self.get_opcode(opcode_name)
-                    
-                    self.code.append(opcode_val)
+                text = f.read()
+        except OSError as e:
+            print(f"Error reading {filename}: {e}")
+            return False
+        return self.parse_asm_text(text)
+
+    def parse_asm_text(self, text):
+        """Parse assembly source into executable code. Returns False on errors."""
+        lines = text.splitlines()
+
+        # Extract string literals from the compiler's header comments ('; 3: "text"')
+        self.string_literals = []
+        for line in lines:
+            match = re.match(r'^;\s*\d+: "(.*)"', line.strip())
+            if match:
+                self.string_literals.append(match.group(1))
+
+        # Extract metadata from the header comments
+        for line in lines[:20]:
+            line = line.strip()
+            if "; Slot:" in line:
+                slot_str = line.split('Slot:')[1].strip()
+                self.slot_idx = int(slot_str, 16)
+                self.log(f"Found slot ID: 0x{self.slot_idx:04X}")
+            elif "; String Block:" in line:
+                self.string_block = int(line.split('String Block:')[1].strip())
+                self.log(f"Found string block: {self.string_block}")
+                self.set_string_block(self.string_block)
+
+        # Strip comments and blank lines; split labels from instructions
+        program = []  # (line number, label or None, opcode name, argument string or None)
+        for number, line in enumerate(lines, 1):
+            line = line.split(';', 1)[0].strip()
+            if not line:
+                continue
+            if line.endswith(':'):
+                program.append((number, line[:-1].strip(), None, None))
+                continue
+            parts = line.split(None, 1)
+            program.append((number, None, parts[0].upper(), parts[1].strip() if len(parts) > 1 else None))
+
+        # First pass: label positions
+        self.labels = {}
+        pc = 0
+        for number, label, opcode_name, arg_str in program:
+            if label is not None:
+                if label in self.labels:
+                    print(f"Error: line {number}: label '{label}' is defined twice")
+                    return False
+                self.labels[label] = pc
+            else:
+                pc += 2 if arg_str is not None else 1
+        self.log(f"Identified {len(self.labels)} labels: {self.labels}")
+
+        # Second pass: emit code
+        self.code = []
+        pc = 0
+        for number, label, opcode_name, arg_str in program:
+            if label is not None:
+                continue
+            try:
+                opcode_val = self.get_opcode(opcode_name)
+                self.code.append(opcode_val)
+                if arg_str is None:
                     self.log(f"Instruction at {pc}: {opcode_name}")
                     pc += 1
-            
-            print(f"Parsed {len(self.code)} instruction values")
-            if self.labels:
-                print(f"Found {len(self.labels)} labels")
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error parsing ASM: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
+                else:
+                    arg_val = self._resolve_argument(arg_str, opcode_name, pc)
+                    self.code.append(arg_val)
+                    self.log(f"Instruction at {pc}: {opcode_name} {arg_val}")
+                    pc += 2
+            except VMError as e:
+                print(f"Error: line {number}: {e}")
+                return False
+
+        self.log(f"Parsed {len(self.code)} instruction values, {len(self.labels)} labels")
+        return True
     
     def get_opcode(self, opcode_name):
         """Convert opcode name to numeric value"""
@@ -481,7 +483,9 @@ class UltimaUnderworldVM:
             'RESPOND_OP': 0x28,
             'OPNEG': 0x29
         }
-        return opcode_map.get(opcode_name, 0)
+        if opcode_name not in opcode_map:
+            raise VMError(f"Unknown instruction '{opcode_name}'")
+        return opcode_map[opcode_name]
     
     def get_opcode_name(self, opcode):
         """Get the string representation of an opcode"""
@@ -580,35 +584,42 @@ class UltimaUnderworldVM:
         
         # FIXED: Move stack much further away for large arrays (Mario level = 384 elements)
         self.stack_pointer = self.memory_slots + 4096  # Start at 96 + 4096 = 4192
+        self.stack_base = self.stack_pointer
         
-        print(f"Optimized memory: globals=0-31, base_ptr={self.base_pointer}, stack_ptr={self.stack_pointer}")
+        self.log(f"Memory: game globals=0-31, base_ptr={self.base_pointer}, stack_ptr={self.stack_pointer}")
 
     
+    @property
+    def stack(self):
+        """The values currently on the stack (bottom first), for debugging"""
+        return self.memory[self.stack_base:self.stack_pointer]
+
     def get_mem(self, address):
-        """Get a value from memory, handling overflow"""
-        if address >= 65536:
-            address %= 65536  # Wrap around for 16-bit addressing
+        """Get a value from memory"""
+        if not 0 <= address < len(self.memory):
+            raise VMError(f"Memory read outside of the address space: {address}")
         return self.memory[address]
     
     def set_mem(self, address, value):
-        """Set a value in memory, handling overflow"""
-        if address >= 65536:
-            address -= 65536
+        """Set a value in memory"""
+        if not 0 <= address < len(self.memory):
+            raise VMError(f"Memory write outside of the address space: {address}")
         self.memory[address] = value
     
     def push(self, value):
         """Push a value onto the stack"""
+        if self.stack_pointer >= len(self.memory):
+            raise VMError("Stack overflow (runaway recursion or a loop that never pops?)")
         self.set_mem(self.stack_pointer, value)
         self.stack_pointer += 1
-        self.stack.append(value)  # For tracking/debugging
     
     def pop(self):
         """Pop a value from the stack"""
+        if self.stack_pointer <= 0:
+            raise VMError("Stack underflow")
         self.stack_pointer -= 1
         value = self.get_mem(self.stack_pointer)
         #self.set_mem(self.stack_pointer, 0)  # Clear the value
-        if self.stack:
-            self.stack.pop()  # For tracking/debugging
         return value
     
     def debug_memory(self, start, count):
@@ -624,19 +635,19 @@ class UltimaUnderworldVM:
             print(f"  [{i:04X}]: {self.get_mem(i)}")
     
     def execute(self):
-        """Execute the conversation code"""
+        """Execute the conversation code from the start"""
         self.pc = 0
-        
+        self._run()
+
+    def _run(self):
         # Execute until finished or waiting for response
         while not self.finished and not self.waiting_response and self.pc < len(self.code):
             opcode = self.code[self.pc]
             handler = self.opcode_handlers.get(opcode)
             
-            if handler:
-                handler()
-            else:
-                print(f"Unknown opcode: 0x{opcode:02X} at PC={self.pc}")
-                self.pc += 1
+            if handler is None:
+                raise VMError(f"Unknown opcode 0x{opcode:02X} at PC={self.pc}")
+            handler()
             
             # Safety check to avoid infinite loops
             if self.pc >= len(self.code):
@@ -649,7 +660,7 @@ class UltimaUnderworldVM:
             self.result_register = choice
         
         self.waiting_response = False
-        self.execute()
+        self._run()
     
     # Opcode implementations
     def op_nop(self):
@@ -825,33 +836,23 @@ class UltimaUnderworldVM:
         self.pc = target
         self.call_level += 1
         
-    #def op_calli(self):
-    #    """Call imported function"""
-    #    func_id = self.code[self.pc + 1]
-    #    self.log(f"CALLI: Calling imported function {func_id}")
-    #    
-    #    if func_id in self.imported_functions:
-    #        self.imported_functions[func_id]()
-    #    else:
-    #        print(f"Warning: Unknown imported function ID {func_id}")
-    #    
-    #    self.pc += 2
     def op_calli(self):
-        """Call imported function"""
+        """Call imported function.
+
+        Like the original engine, CALLI leaves the arguments on the stack:
+        the caller pops them and reads the result with PUSH_REG. The handlers
+        may pop their arguments to read them; the stack pointer is restored
+        afterwards.
+        """
         func_id = self.code[self.pc + 1]
-        
-        #print(f"CALLI: Calling function {func_id} with stack: {self.stack}")
-        
-        if func_id in self.imported_functions:
-            self.imported_functions[func_id]()
-        else:
-            print(f"WARNING: Unknown function ID {func_id}")
-        
-        #print(f"CALLI: After call, result_register = {self.result_register}")
-        
-        # Fix: Push the result register onto the stack after function call
-        self.push(self.result_register)
-        
+        handler = self.imported_functions.get(func_id)
+        if handler is None:
+            raise VMError(f"Unknown imported function ID {func_id}")
+
+        saved_sp = self.stack_pointer
+        handler()
+        self.stack_pointer = saved_sp
+
         self.pc += 2
         
     def op_ret(self):
@@ -923,9 +924,6 @@ class UltimaUnderworldVM:
     def op_bptosp(self):
         """Set stack pointer to base pointer"""
         self.log(f"BPTOSP: Setting stack pointer from {self.stack_pointer} to {self.base_pointer}")
-        # Clear the stack above the base pointer for tracking
-        while len(self.stack) > (self.stack_pointer - self.base_pointer):
-            self.stack.pop()
         self.stack_pointer = self.base_pointer
         self.pc += 1
         
@@ -1005,6 +1003,8 @@ class UltimaUnderworldVM:
     
     def finish_conversation(self):
         """End the conversation"""
+        if self.finished:
+            return
         print("\nConversation finished")
         self.finished = True
         
@@ -1017,253 +1017,153 @@ class UltimaUnderworldVM:
             print(f"Saved variables: {saved_vars}")
     
     # Simplified implementations of imported functions
+    def pop_args(self):
+        """Pop the argument count and the argument pointers of an imported function.
+
+        Returns the pointers as [arg1, arg2, ...]: the engine pushes the last
+        argument first, so arg1 sits right below the argument count.
+        """
+        count = self.pop()
+        return [self.pop() for _ in range(count)]
+
+    def arg_values(self):
+        """The values the argument pointers point to"""
+        return [self.get_mem(ptr) for ptr in self.pop_args()]
+
+    def read_input(self, prompt):
+        """Read a line from the player; ends the conversation when input runs out"""
+        try:
+            return self.input_func(prompt)
+        except EOFError:
+            print("\n(no more input)")
+            self.finish_conversation()
+            return None
+
+    def choose_option(self, options):
+        """Show numbered options and return the chosen index (0-based)"""
+        print("\nChoose an option:")
+        for number, text in enumerate(options, 1):
+            print(f"{number}. {text}")
+        if not options:
+            return None
+        while True:
+            answer = self.read_input(f"Enter choice [1-{len(options)}]: ")
+            if answer is None:
+                return None
+            try:
+                choice = int(answer)
+            except ValueError:
+                choice = 0
+            if 1 <= choice <= len(options):
+                return choice - 1
+            print("Invalid choice, defaulting to 1")
+            return 0
+
     def func_babl_menu(self):
         """Show a menu of dialogue options and get player choice"""
-        # Get the number of arguments (first value pushed, last popped)
-        num_args = self.pop()
-        self.log(f"babl_menu: {num_args} args")
+        string_array_ptr = self.pop_args()[0]
         
-        # Get the string array pointer
-        string_array_ptr = self.pop()
-        self.log(f"String array pointer: {string_array_ptr}")
-        
-        # Read the string IDs from memory
+        # Read the string IDs from memory (the list ends with string id 0)
         options = []
         i = 0
-        while True:
-            string_id = self.get_mem(string_array_ptr + i)
-            if string_id == 0:
-                break
-            
-            text = self.get_string(string_id)
-            options.append((i+1, string_id, text))
+        while self.get_mem(string_array_ptr + i) != 0:
+            options.append(self.get_string(self.get_mem(string_array_ptr + i)))
             i += 1
-        
-        # Display options to the player
-        print("\nChoose an option:")
-        for option_num, _, text in options:
-            print(f"{option_num}. {text}")
-        
-        # Wait for player response
-        self.waiting_response = True
-        
-        # Prompt for input (for our simulation)
-        choice = input("Enter choice [1-{}]: ".format(len(options)))
-        try:
-            choice_num = int(choice)
-            if 1 <= choice_num <= len(options):
-                self.result_register = choice_num
-            else:
-                print("Invalid choice, defaulting to 1")
-                self.result_register = 1
-        except ValueError:
-            print("Invalid input, defaulting to 1")
-            self.result_register = 1
-        
-        # Resume conversation
-        self.waiting_response = False
+
+        choice = self.choose_option(options)
+        self.result_register = 0 if choice is None else choice + 1
     
     def func_babl_fmenu(self):
         """Show a filtered menu of dialogue options"""
-        # Skip getting num_args for simplicity
-        num_args = self.pop()
+        string_array_ptr, flag_array_ptr = self.pop_args()[:2]
         
-        # Get string array and flag array pointers
-        string_array_ptr = self.pop()
-        flag_array_ptr = self.pop()
-        
-        # Read the string IDs and flags
+        # Read the string IDs and flags; only options with a non-zero flag are shown
         options = []
-        flags = []
+        indices = []
         i = 0
-        while True:
-            string_id = self.get_mem(string_array_ptr + i)
-            if string_id == 0:
-                break
-            
-            flag = self.get_mem(flag_array_ptr + i)
-            flags.append(flag)
-            
-            if flag == 1:  # Only show enabled options
-                text = self.get_string(string_id)
-                options.append((i+1, string_id, text))
+        while self.get_mem(string_array_ptr + i) != 0:
+            if self.get_mem(flag_array_ptr + i) != 0:
+                options.append(self.get_string(self.get_mem(string_array_ptr + i)))
+                indices.append(i + 1)
             i += 1
-        
-        # Display options to the player
-        print("\nChoose an option:")
-        valid_indices = []
-        display_index = 1
-        for orig_idx, _, text in options:
-            print(f"{display_index}. {text}")
-            valid_indices.append(orig_idx)
-            display_index += 1
-        
-        # Wait for player response
-        self.waiting_response = True
-        
-        # Prompt for input
-        choice = input("Enter choice [1-{}]: ".format(len(options)))
-        try:
-            choice_num = int(choice)
-            if 1 <= choice_num <= len(options):
-                self.result_register = valid_indices[choice_num-1]
-            else:
-                print("Invalid choice, defaulting to first option")
-                self.result_register = valid_indices[0] if valid_indices else 0
-        except ValueError:
-            print("Invalid input, defaulting to first option")
-            self.result_register = valid_indices[0] if valid_indices else 0
-        
-        # Resume conversation
-        self.waiting_response = False
+
+        choice = self.choose_option(options)
+        # The result is the position in the full list, not among the shown options
+        self.result_register = 0 if choice is None else indices[choice]
     
     def func_print(self):
-        """Print a string"""
-        ptr_to_string_id = self.pop()
-        string_id = self.get_mem(ptr_to_string_id)
-        
-        # FIXED: Use self.current_string_block
-        if (self.current_string_block and 
-            0 <= string_id < len(self.current_string_block)):
-            text = self.current_string_block[string_id]
-            print(f'PRINT: "{text}"')
-        else:
-            print(f"PRINT: [Invalid string ID: {string_id}]")
+        """Print a string that no one speaks (scene description)"""
+        string_id = self.arg_values()[0]
+        print(f'PRINT: "{self.get_string(string_id)}"')
     
     def func_babl_ask(self):
         """Ask the player for input and store it in the string block"""
         print("\nEnter text:")
-        self.waiting_response = True
+        text = self.read_input("> ")
+        if text is None:
+            self.result_register = 0
+            return
         
-        # Get user input
-        text = input("> ")
-        print(f"Input received: {text}")
-        
-        # FIXED: Actually store the user input in the current string block
-        if self.current_string_block is not None:
-            # Add the user input to the string block and return its index
-            self.current_string_block.append(text.lower())  # Convert to lowercase for comparison
-            string_id = len(self.current_string_block) - 1
-            self.result_register = string_id
-            
-            if self.debug:
-                print(f"BABL_ASK: Stored '{text}' as string ID {string_id}")
-        else:
-            # Fallback: use a dummy ID if no string block is loaded
-            print("Warning: No string block loaded, using dummy string ID")
-            self.result_register = 100
-        
-        self.waiting_response = False
+        if self.current_string_block is None:
+            self.current_string_block = ['']
+        # The typed text becomes a new string; its id is the result
+        self.current_string_block.append(text)
+        self.result_register = len(self.current_string_block) - 1
+        self.log(f"BABL_ASK: Stored '{text}' as string ID {self.result_register}")
+
+    def _string_text(self, string_id):
+        if self.current_string_block and 0 <= string_id < len(self.current_string_block):
+            return self.get_string(string_id)
+        return None
     
     def func_compare(self):
-        """Compare two strings for equality"""
-        num_args = self.pop()  # Pop arg count
-        
-        # Pop pointers - these are already effective addresses (like 1585, 1586)
-        ptr1 = self.pop()
-        ptr2 = self.pop()
-        
-        # Retrieve string IDs from these addresses
-        string_id1 = self.get_mem(ptr1)
-        string_id2 = self.get_mem(ptr2)
-        
-        # Debug output for diagnosis
-        self.log(f"COMPARE DEBUG: ptr1={ptr1}, ptr2={ptr2}")
-        self.log(f"COMPARE DEBUG: string_id1={string_id1}, string_id2={string_id2}")
-        
-        # Get and compare the actual strings
-        if (self.current_string_block and 
-            0 <= string_id1 < len(self.current_string_block) and 
-            0 <= string_id2 < len(self.current_string_block)):
-            
-            str1 = self.current_string_block[string_id1].lower()
-            str2 = self.current_string_block[string_id2].lower()
-            
-            print(f'COMPARE: "{str1}" vs "{str2}" -> {self.result_register}')
-            
-            if str1 == str2:
-                self.result_register = 1
-            else:
-                self.result_register = 0
-        else:
-            print(f"COMPARE: Invalid string IDs: {string_id1}, {string_id2}")
+        """Compare two strings for equality, case independent"""
+        id1, id2 = self.arg_values()[:2]
+        str1, str2 = self._string_text(id1), self._string_text(id2)
+        if str1 is None or str2 is None:
+            print(f"COMPARE: Invalid string IDs: {id1}, {id2}")
             self.result_register = 0
+            return
+        self.result_register = 1 if str1.strip().lower() == str2.strip().lower() else 0
+        self.log(f'COMPARE: "{str1}" vs "{str2}" -> {self.result_register}')
     
     def func_random(self):
-        """Generate a random number"""
-        ptr = self.pop()
-        max_val = self.get_mem(ptr)
-        
-        import random
-        self.result_register = random.randint(1, max_val)
-        #print(f"RANDOM: Generated {self.result_register} (1 to {max_val})")
+        """Generate a random number in the range [1..arg1]"""
+        max_val = self.arg_values()[0]
+        self.result_register = random.randint(1, max_val) if max_val >= 1 else 1
     
     def func_contains(self):
-        """Check if one string contains another"""
-        ptr1 = self.pop()
-        ptr2 = self.pop()
-        
-        string_id1 = self.get_mem(ptr1)
-        string_id2 = self.get_mem(ptr2)
-        
-        # FIXED: Use self.current_string_block
-        if (self.current_string_block and
-            0 <= string_id1 < len(self.current_string_block) and 
-            0 <= string_id2 < len(self.current_string_block)):
-            str1 = self.current_string_block[string_id1].lower()
-            str2 = self.current_string_block[string_id2].lower()
-            
-            self.result_register = 1 if str2 in str1 else 0
-            print(f'CONTAINS: "{str2}" in "{str1}" -> {self.result_register}')
-        else:
-            print(f"CONTAINS: Invalid string IDs: {string_id1}, {string_id2}")
+        """Check if the first string contains the second one, case independent"""
+        id1, id2 = self.arg_values()[:2]
+        str1, str2 = self._string_text(id1), self._string_text(id2)
+        if str1 is None or str2 is None:
+            print(f"CONTAINS: Invalid string IDs: {id1}, {id2}")
             self.result_register = 0
+            return
+        self.result_register = 1 if str2.lower() in str1.lower() else 0
+        self.log(f'CONTAINS: "{str2}" in "{str1}" -> {self.result_register}')
     
     def func_length(self):
         """Get the length of a string"""
-        ptr = self.pop()
-        string_id = self.get_mem(ptr)
-        
-        # FIXED: Use self.current_string_block
-        if (self.current_string_block and
-            0 <= string_id < len(self.current_string_block)):
-            length = len(self.current_string_block[string_id])
-            self.result_register = length
-            print(f"LENGTH: String {string_id} has length {length}")
-        else:
+        string_id = self.arg_values()[0]
+        text = self._string_text(string_id)
+        if text is None:
             print(f"LENGTH: Invalid string ID: {string_id}")
             self.result_register = 0
+            return
+        self.result_register = len(text)
     
     def func_get_quest(self):
-        """Get a quest flag value"""
-        ptr = self.pop()
-        quest_id = self.get_mem(ptr)
-        
-        # In a real implementation, this would check a persistent quest store
-        print(f"GET_QUEST: Quest ID {quest_id}")
-        
-        # Simulate getting a quest value
-        print("Enter quest status (0 = not done, 1 = done):")
-        value = int(input("> ") or "0")
-        self.result_register = value
+        """Get a quest flag value (0 unless set or preset with --quest)"""
+        quest_id = self.arg_values()[0]
+        self.result_register = self.quest_flags.get(quest_id, 0)
+        self.log(f"GET_QUEST: Quest {quest_id} = {self.result_register}")
     
     def func_set_quest(self):
-        """Set a quest flag value"""
-        # Pop the argument count first (this is always pushed last)
-        arg_count = self.pop()  # Should be 2
-
-        ptr1 = self.pop()  # Value
-        ptr2 = self.pop()  # Quest ID
-        
-        value = self.get_mem(ptr1)
-        quest_id = self.get_mem(ptr2)
-        
-        print(f"SET_QUEST: Setting quest {quest_id} to {value}")
-
-        # Actually set the quest flag
-        if not hasattr(self, 'quest_flags'):
-            self.quest_flags = {}
+        """Set a quest flag value: arg1 is the new value, arg2 the quest number"""
+        value, quest_id = self.arg_values()[:2]
         self.quest_flags[quest_id] = value
+        print(f"SET_QUEST: Setting quest {quest_id} to {value}")
 
     def func_sex(self):
         """Return string based on player gender"""
@@ -1274,7 +1174,7 @@ class UltimaUnderworldVM:
         male_str_id = self.get_mem(ptr2)
         
         print("Choose gender (m/f):")
-        gender = input("> ").lower()
+        gender = (self.read_input("> ") or "").lower()
         
         if gender.startswith('m'):
             self.result_register = male_str_id
@@ -1290,12 +1190,12 @@ class UltimaUnderworldVM:
         
         print("SHOW_INV: Showing inventory interface")
         print("Enter number of items to select (0-4):")
-        count = min(4, max(0, int(input("> ") or "0")))
+        count = min(4, max(0, int((self.read_input("> ") or "") or "0")))
         
         # Simulate selecting items
         for i in range(count):
             print(f"Enter object ID for item {i+1}:")
-            obj_id = int(input("> ") or "0")
+            obj_id = int((self.read_input("> ") or "") or "0")
             
             self.set_mem(ptr2 + i, obj_id)
             self.set_mem(ptr1 + i, 750 + i)  # Dummy master list position
@@ -1312,7 +1212,7 @@ class UltimaUnderworldVM:
         
         print(f"GIVE_TO_NPC: Giving {count} items to NPC")
         print("Accept items? (y/n):")
-        accept = input("> ").lower().startswith('y')
+        accept = (self.read_input("> ") or "").lower().startswith('y')
         
         self.result_register = 1 if accept else 0
         print(f"GIVE_TO_NPC: NPC {'accepted' if accept else 'rejected'} items")
@@ -1334,7 +1234,7 @@ class UltimaUnderworldVM:
         
         print(f"TAKE_FROM_NPC: Taking item ID {item_id} from NPC")
         print("Accept item? (y/n):")
-        accept = input("> ").lower().startswith('y')
+        accept = (self.read_input("> ") or "").lower().startswith('y')
         
         self.result_register = 1 if accept else 2  # 1 = OK, 2 = No space
         print(f"TAKE_FROM_NPC: {'Accepted' if self.result_register == 1 else 'No space for'} item")
@@ -1346,7 +1246,7 @@ class UltimaUnderworldVM:
         
         print(f"TAKE_ID_FROM_NPC: Taking item at position {position} from NPC")
         print("Accept item? (y/n):")
-        accept = input("> ").lower().startswith('y')
+        accept = (self.read_input("> ") or "").lower().startswith('y')
         
         self.result_register = 1 if accept else 2  # 1 = OK, 2 = No space
         print(f"TAKE_ID_FROM_NPC: {'Accepted' if self.result_register == 1 else 'No space for'} item")
@@ -1371,7 +1271,7 @@ class UltimaUnderworldVM:
             self.pop()
         
         print("Accept offer? (y/n):")
-        accept = input("> ").lower().startswith('y')
+        accept = (self.read_input("> ") or "").lower().startswith('y')
         
         self.result_register = 1 if accept else 0
         print(f"DO_OFFER: Offer {'accepted' if accept else 'rejected'}")
@@ -1386,7 +1286,7 @@ class UltimaUnderworldVM:
         
         print("DO_DEMAND: Processing demand")
         print("Accept demand? (y/n):")
-        accept = input("> ").lower().startswith('y')
+        accept = (self.read_input("> ") or "").lower().startswith('y')
         
         if accept:
             print(f"DO_DEMAND: Using willing string ID {willing_str_id}")
@@ -1466,18 +1366,10 @@ class UltimaUnderworldVM:
         print(f"SET_LIKES_DISLIKES: Setting likes at {ptr1}, dislikes at {ptr2}")
     
     def func_gronk_door(self):
-        """Open/close door or portcullis"""
-        ptr1 = self.pop()  # Close/open flag
-        ptr2 = self.pop()  # Y tile
-        ptr3 = self.pop()  # X tile
-        
-        flag = self.get_mem(ptr1)
-        y = self.get_mem(ptr2)
-        x = self.get_mem(ptr3)
-        
+        """Open/close door or portcullis: gronk_door(x, y, flag)"""
+        x, y, flag = self.arg_values()[:3]
         action = "Opening" if flag == 0 else "Closing"
         print(f"GRONK_DOOR: {action} door at ({x}, {y})")
-        
         self.result_register = 1  # Success
     
     def func_set_race_attitude(self):
@@ -1607,40 +1499,74 @@ class UltimaUnderworldVM:
         self.result_register = 0  # Not found
         print(f"FIND_BARTER_TOTAL: Result is {self.result_register}")
 
-def main():
-    """Main function to run the Ultima Underworld VM"""
-    parser = argparse.ArgumentParser(description='Ultima Underworld Conversation VM')
-    parser.add_argument('conversation', help='Path to the conversation ASM file')
-    parser.add_argument('--strings', help='Path to the string block file', default='uw-strings.txt')
-    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
-    args = parser.parse_args()
+def load_program(vm, program, strings=None, block=1):
+    """Load a .asm file (or compile a .uws file) and its strings into the VM.
+
+    Returns an error message or None.
+    """
+    stem, ext = os.path.splitext(program)
+    if ext.lower() == '.uws':
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from uwscript_compiler import compile_uwscript, UWScriptError
+        try:
+            with open(program, 'r', encoding='utf-8') as f:
+                result = compile_uwscript(f.read(), block, source_name=os.path.basename(program))
+        except UWScriptError as e:
+            return f"{program}: error: {e}"
+        if strings:
+            vm.load_string_blocks(strings)
+        else:
+            vm.load_string_blocks_text(result['strings'])
+        if not vm.parse_asm_text(result['assembly']):
+            return "Could not load the compiled assembly"
+        return None
+
+    strings = strings or f"{stem}_strings.txt"
+    if not os.path.exists(strings):
+        return f"String block file '{strings}' not found (use --strings)"
+    if not vm.load_string_blocks(strings):
+        return f"Could not load '{strings}'"
+    if not vm.parse_asm(program):
+        return f"Could not load '{program}'"
+    return None
+
+
+def main(argv=None):
+    """Run a conversation in the terminal"""
+    parser = argparse.ArgumentParser(description='Run an Ultima Underworld conversation (.asm or .uws).')
+    parser.add_argument('program', help='conversation assembly (.asm) or UWScript source (.uws)')
+    parser.add_argument('--strings', help='string block file (default: <program>_strings.txt)')
+    parser.add_argument('--quest', action='append', default=[], metavar='ID=VALUE',
+                        help='preset a quest flag for get_quest (repeatable)')
+    parser.add_argument('--debug', action='store_true', help='trace every instruction')
+    args = parser.parse_args(argv)
     
-    if not os.path.exists(args.conversation):
-        print(f"Error: Conversation file '{args.conversation}' not found")
-        return
-    
-    if not os.path.exists(args.strings):
-        print(f"Error: String block file '{args.strings}' not found")
-        return
-    
-    print("=== Ultima Underworld Conversation VM ===")
-    
-    # Create VM
+    if not os.path.exists(args.program):
+        print(f"Error: '{args.program}' not found")
+        return 1
+
     vm = UltimaUnderworldVM(debug=args.debug)
-    
-    # Load string blocks
-    vm.load_string_blocks(args.strings)
-    
-    # Parse and load the assembly code
-    vm.parse_asm(args.conversation)
-    
-    # Initialize memory
+    for preset in args.quest:
+        try:
+            quest_id, value = (int(part) for part in preset.split('=', 1))
+        except ValueError:
+            print(f"Error: --quest expects ID=VALUE, got '{preset}'")
+            return 1
+        vm.quest_flags[quest_id] = value
+
+    error = load_program(vm, args.program, args.strings)
+    if error:
+        print(f"Error: {error}")
+        return 1
+
     vm.initialize_memory()
-    
-    # Execute the conversation
-    vm.execute()
-    
-    print("Conversation complete")
+    try:
+        vm.execute()
+    except VMError as e:
+        print(f"\nVM error at PC={vm.pc}: {e}")
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

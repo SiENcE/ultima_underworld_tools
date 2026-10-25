@@ -19,21 +19,22 @@ The enhanced version includes:
 pip install -r requirements.txt
 ```
 
-The console imports the VM (`uw_cnv_runner.py`) and the compiler (`uwscript_compiler.py`) from [`../uwscript`](../uwscript/README.md), so keep the two folders side by side.
+The console imports the VM (`uwscript_vm.py`) and the compiler (`uwscript_compiler.py`) from [`../uwscript`](../uwscript/README.md), so keep the two folders side by side.
 
 ## How to Use
 
 1. Write your program in [UWScript](../uwscript/README.md) (see `samples/`), or directly in UW assembly.
 
-2. Compile and run it in one step (Windows):
+2. Run it. The console compiles `.uws` files itself:
    ```
-   start.bat samples\fantasy_pong.uws
+   python fantasy_console.py samples/fantasy_pong.uws
    ```
-   or do it manually:
+   or compile first and run the assembly (the console finds `<name>_strings.txt` next to the `.asm`):
    ```
-   python ../uwscript/uwscript_compiler.py samples/fantasy_pong.uws -o output.asm -s uw-strings.txt
-   python fantasy_console.py output.asm --strings uw-strings.txt
+   python ../uwscript/uwscript_compiler.py samples/fantasy_pong.uws
+   python fantasy_console.py samples/fantasy_pong.asm
    ```
+   On Windows, `start.bat samples\fantasy_pong.uws` does both steps.
    `standalone_jumprun.py` is a self-contained example that compiles and runs an embedded game.
 
 3. Controls:
@@ -295,7 +296,7 @@ is_key_released(key_code) -> CALLI 301
 math_sin(angle) -> CALLI 501
 math_cos(angle) -> CALLI 502
 math_sqrt(value) -> CALLI 503
-sys_delay(milliseconds) -> CALLI 900
+delay(milliseconds) -> CALLI 900
 ```
 
 ### Key Codes

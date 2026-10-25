@@ -1,4 +1,4 @@
-// simple_function_test.uws - Test function parsing issue
+// Functions: a function without parameters that uses a local variable
 
 function test_function()
     say "Inside function"

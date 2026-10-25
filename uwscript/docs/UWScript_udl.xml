@@ -13,7 +13,7 @@
             <Keywords name="Numbers, suffix1"></Keywords>
             <Keywords name="Numbers, suffix2"></Keywords>
             <Keywords name="Numbers, range"></Keywords>
-            <Keywords name="Operators1">+ - * / % = == != &gt; &lt; &gt;= &lt;= += -= *= /=</Keywords>
+            <Keywords name="Operators1">+ - * / % = == != ! &gt; &lt; &gt;= &lt;= += -= *= /= %=</Keywords>
             <Keywords name="Operators2"></Keywords>
             <Keywords name="Folders in code1, open"></Keywords>
             <Keywords name="Folders in code1, middle"></Keywords>
@@ -27,7 +27,7 @@
             <Keywords name="Keywords1">if else elseif endif while endwhile function endfunction return say ask menu filtermenu and or not goto label exit</Keywords>
             <Keywords name="Keywords2">random get_quest set_quest compare string_length contains gronk_door</Keywords>
             <Keywords name="Keywords3">let true false</Keywords>
-            <Keywords name="Keywords4">clear_screen set_pixel draw_line draw_rect fill_rect draw_circle draw_sprite print flip_display play_tone is_key_pressed is_key_released math_sin math_cos math_sqrt</Keywords>
+            <Keywords name="Keywords4">clear_screen set_pixel draw_line draw_rect fill_rect draw_circle draw_sprite print flip_display play_tone is_key_pressed is_key_released math_sin math_cos math_sqrt delay</Keywords>
             <Keywords name="Keywords5"></Keywords>
             <Keywords name="Keywords6"></Keywords>
             <Keywords name="Keywords7"></Keywords>

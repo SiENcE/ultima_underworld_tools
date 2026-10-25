@@ -1,5 +1,4 @@
-// Simple Array Access Test
-// Tests basic array element retrieval
+// Arrays: create an array and read its elements
 
 say "Array Access Test"
 

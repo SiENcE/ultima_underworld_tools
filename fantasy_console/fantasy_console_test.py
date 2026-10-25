@@ -1,5 +1,7 @@
 # test_fantasy_console.py
 
+import contextlib
+import io
 import unittest
 import pygame
 import os
@@ -328,12 +330,12 @@ class FantasyConsoleTests(unittest.TestCase):
         """
         
         self.compile_and_load(script)
-        self.execute_until_complete()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.execute_until_complete()
         
-        # Check that strings were correctly generated
-        # (This would normally be a SAY_OP instruction with the correct string ID)
-        self.assertTrue("Testing Console" in self.console.string_literals or 
-                      "Testing @SS0" in self.console.string_literals)
+        # The concatenation is a text substitution that the VM resolves when saying it
+        self.assertIn('NPC: "Testing Console"', output.getvalue())
 
 if __name__ == "__main__":
     unittest.main()

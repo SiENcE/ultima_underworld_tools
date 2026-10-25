@@ -978,6 +978,16 @@ python tools/conversations/uw_cnv_runner.py conversation.asm --strings uw-string
 Options:
 - `--debug` - Show detailed execution trace
 
+### UWScript (uwscript/)
+
+Instead of writing assembly by hand, you can write conversations in UWScript, a small high-level language, and compile them to assembly:
+```bash
+python uwscript/uwscript_compiler.py my_conversation.uws      # writes my_conversation.asm + my_conversation_strings.txt
+python uwscript/uwscript_vm.py my_conversation.uws            # compile and test in the terminal
+```
+
+See [uwscript/README.md](../uwscript/README.md) and the [language reference](../uwscript/docs/uwscript-language-spec.md).
+
 ---
 
 By mastering this toolkit, you can create, test, and implement sophisticated conversations for Ultima Underworld. The provided tools handle every step of the development process, from extraction and analysis to testing and compilation.

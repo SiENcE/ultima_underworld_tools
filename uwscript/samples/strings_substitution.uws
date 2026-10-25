@@ -1,4 +1,4 @@
-// Test text substitutions
+// Text substitution: "text" + variable is turned into @GI/@GS codes
 let health = 75
 let mana = 50
 let player_name = "Avatar"

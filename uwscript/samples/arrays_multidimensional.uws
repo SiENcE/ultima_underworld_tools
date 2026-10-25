@@ -1,0 +1,41 @@
+// Arrays: nested (2D) arrays, string arrays, element updates and arrays as parameters
+
+// A 3x3 board, stored row by row
+let board = [
+    [1, 0, 1],
+    [0, 1, 0],
+    [1, 0, 1]
+]
+
+say "Center of the board: " + board[1][1]
+
+let row = 0
+let filled = 0
+while row < 3
+    let col = 0
+    while col < 3
+        filled += board[row][col]
+        col += 1
+    endwhile
+    row += 1
+endwhile
+say "Filled squares: " + filled
+
+// Arrays of strings hold string ids; they print as text
+let inventory = ["sword", "shield", "potion"]
+inventory[2] = "map"
+say "Last item: " + inventory[2]
+
+// An array passed to a function is passed by address, so changes are visible
+function double_all(values, count)
+    let i = 0
+    while i < count
+        values[i] *= 2
+        i += 1
+    endwhile
+endfunction
+
+let damage = [5, 10, 15]
+double_all(damage, 3)
+say "Damage after doubling: " + damage[0] + ", " + damage[1] + ", " + damage[2]
+exit

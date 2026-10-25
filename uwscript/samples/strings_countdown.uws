@@ -1,4 +1,4 @@
-// Simple while loop test with text substitutions
+// A countdown that prints the counter inside the text
 let counter = 3
 
 say "Starting countdown"

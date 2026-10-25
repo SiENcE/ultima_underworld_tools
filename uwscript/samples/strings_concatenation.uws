@@ -1,0 +1,32 @@
+// Strings: chained concatenation, stored strings, typed input and comparison
+
+let name = "Avatar"
+let level = 3
+
+// Any mix of text, variables and expressions can be joined with +
+say "Welcome, " + name + " of level " + level + "!"
+say "Next level in " + (level + 1) * 100 + " experience points."
+
+// A stored string keeps the values from the moment it was built
+let status = name + " has " + level + " levels"
+level = 4
+say status
+say "(level is now " + level + ")"
+
+// += appends to a string variable
+let greeting = "Well met"
+greeting += ", traveler"
+say greeting
+
+// ask stores the typed text as a string
+say "What is the password?"
+ask password
+say "You said: " + password
+
+// == and != on strings compare the text, ignoring case
+if password == "mellon"
+    say "The door opens."
+else
+    say "The door stays shut."
+endif
+exit

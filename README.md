@@ -16,7 +16,14 @@ A collection of Python utilities for analyzing, extracting, and modifying conten
 7. **uw_cnv_runner.py** - A virtual machine for running and testing Ultima Underworld conversation scripts
 
 ### UWScript (`uwscript/`)
-A high-level language that compiles to UW conversation assembly. See [uwscript/README.md](uwscript/README.md).
+A high-level language for conversations that compiles to UW conversation assembly, with its own VM (`uwscript_vm.py`) to run the result in the terminal:
+
+```bash
+python uwscript/uwscript_compiler.py uwscript/samples/conversation_gray_goblin.uws   # writes .asm + _strings.txt
+python uwscript/uwscript_vm.py uwscript/samples/conversation_gray_goblin.uws         # compile and run
+```
+
+See [uwscript/README.md](uwscript/README.md).
 
 ### Fantasy Console (`fantasy_console/`)
 A pygame-based "fantasy console" that extends the conversation VM with graphics, input and sound, programmed in UWScript. See [fantasy_console/README.md](fantasy_console/README.md).
@@ -27,7 +34,7 @@ A pygame-based "fantasy console" that extends the conversation VM with graphics,
 tools/
   strings/           STRINGS.PAK analyzer, extractor, packer and translator
   conversations/     CNV.ARK decompiler, compiler and conversation VM
-uwscript/            UWScript compiler, its VM, samples and language docs
+uwscript/            UWScript compiler, its VM, samples, tests and language docs
 fantasy_console/     Fantasy console built on the VM, with game samples
 docs/                Conversation format spec, development manual, translator guide
 ```

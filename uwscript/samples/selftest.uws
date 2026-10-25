@@ -1,0 +1,90 @@
+// Self test: exercises the main language features and reports PASS or FAIL.
+// Run it with: python uwscript_vm.py samples/selftest.uws
+say "=== UWScript self test ==="
+
+let failures = 0
+
+// Return values and parameter order
+function difference(a, b)
+    return a - b
+endfunction
+
+function forty_two()
+    return 42
+endfunction
+
+let d = difference(10, 3)
+say "difference(10, 3) = " + d + " (expected 7)"
+if d != 7 or forty_two() != 42
+    failures += 1
+endif
+
+// Functions can read and change globals
+let counter = 5
+function bump(amount)
+    counter += amount
+endfunction
+bump(2)
+say "counter = " + counter + " (expected 7)"
+if counter != 7
+    failures += 1
+endif
+
+// Recursion
+function factorial(n)
+    if n <= 1
+        return 1
+    endif
+    return n * factorial(n - 1)
+endfunction
+let f = factorial(6)
+say "factorial(6) = " + f + " (expected 720)"
+if f != 720
+    failures += 1
+endif
+
+// Arrays, nested arrays and arrays passed to functions
+let numbers = [10, 20, 30, 40, 50]
+let grid = [
+    [1, 2, 3],
+    [4, 5, 6]
+]
+function sum(values, count)
+    let total = 0
+    let i = 0
+    while i < count
+        total += values[i]
+        i += 1
+    endwhile
+    return total
+endfunction
+let s = sum(numbers, 5)
+say "sum(numbers) = " + s + ", grid[1][2] = " + grid[1][2] + " (expected 150, 6)"
+if s != 150 or grid[1][2] != 6
+    failures += 1
+endif
+
+// Strings: chained concatenation, string arrays and comparison
+let name = "Avatar"
+let items = ["sword", "shield"]
+let line = "Hello " + name + ", you carry a " + items[1] + " and " + (2 + 3) + " coins"
+say line
+if name == "AVATAR"
+    say "string comparison ignores case"
+else
+    failures += 1
+endif
+
+// Logical operators work on any non-zero value
+let a = 1
+let b = 2
+if not (a and b)
+    failures += 1
+endif
+
+if failures == 0
+    say "PASS: all self tests passed"
+else
+    say "FAIL: " + failures + " self test(s) failed"
+endif
+exit

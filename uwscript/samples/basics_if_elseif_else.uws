@@ -1,4 +1,4 @@
-// minimal_if_test.uws - Test nested if statements
+// If statements: if, if/else, if/elseif/else and nesting
 
 let x = 10
 let y = 5

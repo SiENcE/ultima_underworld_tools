@@ -1,4 +1,4 @@
-// Simple while loop test without string concatenation
+// While loops: countdowns and nested loops (no string building)
 let counter = 3
 
 say "Starting simple countdown"
