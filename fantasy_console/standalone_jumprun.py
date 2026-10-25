@@ -199,7 +199,7 @@ def compile_and_run():
     
     try:
         # Compile the UWScript source
-        result = compile_uwscript(GAME_SOURCE, block_id=1)
+        result = compile_uwscript(GAME_SOURCE, block_id=1, target='console')
         
         # Create temporary files for assembly and strings
         with tempfile.NamedTemporaryFile(mode='w', suffix='.asm', delete=False) as asm_file:

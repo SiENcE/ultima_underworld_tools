@@ -1522,7 +1522,7 @@ class UltimaUnderworldVM:
         self.result_register = 0  # Not found
         print(f"FIND_BARTER_TOTAL: Result is {self.result_register}")
 
-def load_program(vm, program, strings=None, block=1):
+def load_program(vm, program, strings=None, block=1, target='uw'):
     """Load a .asm file (or compile a .uws file) and its strings into the VM.
 
     Returns an error message or None.
@@ -1533,7 +1533,8 @@ def load_program(vm, program, strings=None, block=1):
         from uwscript_compiler import compile_uwscript, UWScriptError
         try:
             with open(program, 'r', encoding='utf-8') as f:
-                result = compile_uwscript(f.read(), block, source_name=os.path.basename(program))
+                result = compile_uwscript(f.read(), block, source_name=os.path.basename(program),
+                                          target=target)
         except UWScriptError as e:
             return f"{program}: error: {e}"
         if strings:

@@ -38,7 +38,7 @@ class FantasyConsoleTests(unittest.TestCase):
     def compile_and_load(self, script, string_block=1):
         """Compile UWScript to assembly and load it into the console"""
         # Compile the script
-        result = compile_uwscript(script, string_block)
+        result = compile_uwscript(script, string_block, target='console')
         
         # Write assembly to temp file
         asm_path = os.path.join(self.temp_dir.name, "test.asm")

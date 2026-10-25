@@ -805,7 +805,7 @@ def main():
     console.frame_delay = 1.0 / args.fps
     
     # Load (or compile) the program and its strings
-    error = load_program(console, args.program, args.strings)
+    error = load_program(console, args.program, args.strings, target='console')
     if error:
         print(f"Error: {error}")
         return 1

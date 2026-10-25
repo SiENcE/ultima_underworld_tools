@@ -18,6 +18,10 @@ import sys
 from enum import Enum, auto
 from typing import Dict, List, Optional
 
+# Compilation targets: 'uw' produces conversations the original game can run;
+# 'console' also allows the fantasy console functions and VM extensions.
+TARGETS = ('uw', 'console')
+
 # Absolute address of the first UWScript global. It matches the frame pointer
 # the VM starts the main program with, so globals sit right after the
 # imported game globals and the conversation's private memory slots.
@@ -898,8 +902,12 @@ class FunctionInfo:
 class CodeGenerator:
     """Generates UW assembly from a UWScript AST."""
 
-    def __init__(self, source_name: Optional[str] = None):
+    def __init__(self, source_name: Optional[str] = None, target: str = 'uw'):
+        if target not in TARGETS:
+            raise UWScriptError(f"Unknown target '{target}' (use one of: {', '.join(TARGETS)})")
         self.source_name = source_name
+        self.target = target
+        self.loop_depth = 0
         self.string_block = 1
         self.out: list = []
         self.main_code: list = []
@@ -1273,8 +1281,10 @@ class CodeGenerator:
             self._emit_label(start_label)
             self._gen_expr(node.condition)
             self._emit("BEQ", end_label)
+            self.loop_depth += 1
             for stmt in node.body:
                 self._gen_statement(stmt)
+            self.loop_depth -= 1
             self._emit("JMP", start_label)
             self._emit_label(end_label)
 
@@ -1529,6 +1539,9 @@ class CodeGenerator:
             expected = str(builtin.min_args) if builtin.min_args == builtin.max_args \
                 else f"{builtin.min_args} to {builtin.max_args}"
             raise UWScriptError(f"Function '{node.name}' expects {expected} argument(s), got {count}", node.line)
+        if builtin.order == 'console' and self.target != 'console':
+            raise UWScriptError(f"'{node.name}' is a fantasy console function and does not exist in Ultima "
+                                f"Underworld (compile with --target console)", node.line)
 
         # Every argument is passed by reference (a pointer to its value)
         block = self._alloc_temps(count)
@@ -1703,10 +1716,19 @@ class CodeGenerator:
             self._emit("PUSHI", string_id)
             return
 
-        # The template would refer to itself the next time this line runs, so
-        # expand it into a new string now. Only the UWScript VM can do that.
-        self.warnings.append(f"Line {node.line}: a string built from itself (like s += \"x\") uses a "
-                             f"function that only the UWScript VM and the fantasy console provide")
+        # The template would refer to itself the next time this line runs.
+        if self.target != 'console':
+            may_repeat = self.loop_depth > 0 or self.scope is not None or bool(self.main_labels)
+            if may_repeat:
+                raise UWScriptError(
+                    "A string built from itself (s += \"x\", s = s + ..., or a recursive join) only works "
+                    "once in Ultima Underworld, but this line can run again (it is in a loop, a function or "
+                    "a program with labels). Build the text in one expression, or compile with --target "
+                    "console", node.line)
+            self._emit("PUSHI", string_id)
+            return
+
+        # The fantasy console VM can expand the template into a new string now.
         temp = self._alloc_temps(1)
         temp_loc = self._temp_loc(temp)
         self._emit_addr(temp_loc)
@@ -1809,6 +1831,7 @@ class CodeGenerator:
             lines.append(f"; Source: {self.source_name}")
         lines += [
             f"; String Block: {self.string_block}",
+            f"; Target: {'Ultima Underworld' if self.target == 'uw' else 'fantasy console'}",
             f"; Globals: {self.global_size} variable slot(s), "
             f"{self.memory_end - GLOBALS_BASE - self.global_size} hidden slot(s), starting at {GLOBALS_BASE}",
             ";",
@@ -1862,15 +1885,17 @@ def generate_strings_file(strings: List[str], block_id: int) -> str:
 
 
 def compile_uwscript(source: str, block_id: int = 1, debug: bool = False,
-                     source_name: Optional[str] = None) -> Dict[str, str]:
+                     source_name: Optional[str] = None, target: str = 'uw') -> Dict[str, str]:
     """Compile UWScript source code.
 
-    Returns a dict with the "assembly" and "strings" file contents.
-    Raises UWScriptError on errors.
+    `target` is 'uw' (default: only what the original game supports) or
+    'console' (also the fantasy console functions).
+    Returns a dict with the "assembly" and "strings" file contents and a
+    list of warnings. Raises UWScriptError on errors.
     """
     tokens = Lexer(source).tokenize()
     ast = Parser(tokens, debug=debug).parse()
-    generator = CodeGenerator(source_name)
+    generator = CodeGenerator(source_name, target)
     assembly = generator.generate(ast, block_id)
     return {
         "assembly": assembly,
@@ -1897,6 +1922,9 @@ def main(argv=None) -> int:
     parser.add_argument("-o", "--output", help="assembly output file (default: <input>.asm, '-' for stdout)")
     parser.add_argument("-s", "--strings", help="string block output file (default: <output>_strings.txt)")
     parser.add_argument("-b", "--block", type=int, default=1, help="string block id (default: 1)")
+    parser.add_argument("-t", "--target", choices=TARGETS, default='uw',
+                        help="'uw' (default): only what Ultima Underworld supports; "
+                             "'console': also the fantasy console functions")
     parser.add_argument("-v", "--verbose", action="store_true", help="print the written files")
     parser.add_argument("--debug", action="store_true", help="print parser debug output and tracebacks")
     args = parser.parse_args(argv)
@@ -1911,7 +1939,7 @@ def main(argv=None) -> int:
     output, strings = default_output_paths(args.input, args.output, args.strings)
     try:
         result = compile_uwscript(source, args.block, debug=args.debug,
-                                  source_name=os.path.basename(args.input))
+                                  source_name=os.path.basename(args.input), target=args.target)
     except UWScriptError as e:
         print(f"{args.input}: error: {e}", file=sys.stderr)
         if args.debug:

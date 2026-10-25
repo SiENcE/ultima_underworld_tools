@@ -26,9 +26,9 @@ from uwscript_compiler import compile_uwscript, UWScriptError  # noqa: E402
 from uwscript_vm import UltimaUnderworldVM, VMError  # noqa: E402
 
 
-def run(source, inputs=(), quests=None):
+def run(source, inputs=(), quests=None, target='uw'):
     """Compile and run a program. Returns (said lines, full output, vm)."""
-    result = compile_uwscript(source)
+    result = compile_uwscript(source, target=target)
     vm = UltimaUnderworldVM()
     answers = list(inputs)
     def scripted_input(prompt=''):
@@ -506,17 +506,31 @@ function wrap(n)
     return "<" + wrap(n - 1) + ">"
 endfunction
 say wrap(3)
-'''), ["xxx", "abc", "<<<.>>>"])
-        warnings = compile_uwscript('let s = ""\ns += "x"')['warnings']
-        self.assertEqual(len(warnings), 1)
+''', target='console'), ["xxx", "abc", "<<<.>>>"])
+
+    def test_string_built_from_itself_in_uw_target(self):
+        # Once is fine in the game; a line that can run again is refused
+        self.assertEqual(says('let s = "a"\ns += "b"\ns = s + "c"\nsay s'), ["abc"])
+        for source in ('let s = ""\nwhile 1\n    s += "x"\nendwhile',
+                       'function f(s)\n    s += "x"\nendfunction',
+                       'let s = ""\nlabel top\ns += "x"\ngoto top'):
+            with self.assertRaisesRegex(UWScriptError, "only works once"):
+                compile_uwscript(source)
 
     def test_plain_stored_strings_stay_engine_compatible(self):
         result = compile_uwscript('let hp = 3\nlet msg = "HP: " + hp\nsay msg')
         self.assertEqual(result['warnings'], [])
         self.assertNotIn("CALLI 600", result['assembly'])
 
+    def test_console_functions_need_console_target(self):
+        with self.assertRaisesRegex(UWScriptError, "fantasy console function"):
+            compile_uwscript('clear_screen(0)')
+        self.assertIn("CALLI 100", compile_uwscript('clear_screen(0)', target='console')['assembly'])
+
     def test_append_to_string_array_element(self):
         self.assertEqual(says('let a = ["x"]\na[0] += "y"\na[0] += "z"\nsay a[0]'), ["xyz"])
+        self.assertEqual(says('let a = ["x"]\nlet i = 0\nwhile i < 2\n    a[0] += "y"\n    i += 1\nendwhile\nsay a[0]',
+                              target='console'), ["xyy"])
 
     def test_assigning_a_row_is_an_error(self):
         for source in ('let m = [[1,2],[3,4]]\nm[1] = 9', 'let m = [[1,2],[3,4]]\nm[1] += 5'):
