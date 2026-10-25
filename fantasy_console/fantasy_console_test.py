@@ -12,7 +12,7 @@ import tempfile
 # The VM and the UWScript compiler live in ../uwscript
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uwscript'))
 from fantasy_console import FantasyConsole
-from uwscript_compiler import compile_uwscript
+from uwscript_compiler import compile_uwscript, GLOBALS_BASE
 
 class FantasyConsoleTests(unittest.TestCase):
     """Test cases for the FantasyUW fantasy console"""
@@ -203,8 +203,7 @@ class FantasyConsoleTests(unittest.TestCase):
         self.execute_until_complete()
         
         # Check that key_state was set to 1 (key is pressed)
-        # Fix: Use base_pointer offset instead of direct memory address
-        self.assertEqual(self.console.get_mem(self.console.base_pointer), 1)
+        self.assertEqual(self.console.get_mem(GLOBALS_BASE), 1)
         
         # Reset and test key not pressed
         self.console.keys_pressed.clear()
@@ -212,8 +211,7 @@ class FantasyConsoleTests(unittest.TestCase):
         self.execute_until_complete()
         
         # Check that key_state was set to 2 (key not pressed)
-        # Fix: Use base_pointer offset instead of direct memory address
-        self.assertEqual(self.console.get_mem(self.console.base_pointer), 2)
+        self.assertEqual(self.console.get_mem(GLOBALS_BASE), 2)
     
     def test_complex_program(self):
         """Test a more complex program with multiple operations"""
@@ -317,9 +315,9 @@ class FantasyConsoleTests(unittest.TestCase):
         self.execute_until_complete()
         
         # Check that variables have the correct values
-        self.assertEqual(self.console.get_mem(self.console.base_pointer), 10)  # a
-        self.assertEqual(self.console.get_mem(self.console.base_pointer+1), 20)  # b
-        self.assertEqual(self.console.get_mem(self.console.base_pointer+2), 4)   # result
+        self.assertEqual(self.console.get_mem(GLOBALS_BASE), 10)  # a
+        self.assertEqual(self.console.get_mem(GLOBALS_BASE + 1), 20)  # b
+        self.assertEqual(self.console.get_mem(GLOBALS_BASE + 2), 4)   # result
     
     def test_string_operations(self):
         """Test string handling and say operations"""
@@ -375,7 +373,7 @@ class FantasyConsoleTests(unittest.TestCase):
         self.execute_until_complete()
         self.assertEqual(self.console.display_buffer[64][54], 6)
         self.assertEqual(self.console.display_buffer[54][54], 0)
-        base = self.console.base_pointer
+        base = GLOBALS_BASE
         self.assertEqual([self.console.get_mem(base + i) for i in range(3)], [6, 0, -1])
 
     def test_frame_count_and_key_aliases(self):
@@ -389,7 +387,7 @@ class FantasyConsoleTests(unittest.TestCase):
         self.console.frame_count = 12
         self.console.keys_pressed.add(pygame.K_a)   # A is an alias for left
         self.execute_until_complete()
-        base = self.console.base_pointer
+        base = GLOBALS_BASE
         self.assertEqual([self.console.get_mem(base + i) for i in range(3)], [12, 1, 0])
 
     def test_headless_run_with_screenshot(self):

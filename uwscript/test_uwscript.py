@@ -22,8 +22,9 @@ import unittest
 UWSCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, UWSCRIPT_DIR)
 
-from uwscript_compiler import compile_uwscript, UWScriptError  # noqa: E402
+from uwscript_compiler import compile_uwscript, UWScriptError, GLOBALS_BASE  # noqa: E402
 from uwscript_vm import UltimaUnderworldVM, VMError  # noqa: E402
+from uw_engine import GAME_GLOBALS, OPCODE_NAMES  # noqa: E402
 
 
 def run(source, inputs=(), quests=None, target='uw'):
@@ -257,8 +258,8 @@ endwhile
 let one = random(1)
 exit
 ''')
-        self.assertEqual(vm.get_mem(96 + 1), 1)   # ok
-        self.assertEqual(vm.get_mem(96 + 3), 1)   # one
+        self.assertEqual(vm.get_mem(GLOBALS_BASE + 1), 1)   # ok
+        self.assertEqual(vm.get_mem(GLOBALS_BASE + 3), 1)   # one
 
     def test_string_builtins(self):
         self.assertEqual(says('''
@@ -602,6 +603,363 @@ endfunction
 pick()
 say "" + answer + " " + name
 ''', inputs=['2', 'Bob']), ["2 Bob"])
+
+
+def reference_run(binary, strings_text, inputs=(), quests=None, game_values=None):
+    """Run an assembled conversation (.bin) the way Underworld Adventures' CodeVM does.
+
+    A test-only transcription of conv/CodeVM.cpp (16-bit words, the stack
+    pointer on the top value, CALL pushing its operand address, branches
+    relative to the operand word, imported functions reading their
+    arguments without popping, a 4096 word memory). Two deliberate
+    differences: RET ends the conversation at call level 0 (CodeVM's check
+    is inverted), and comparisons/division treat words as signed.
+    Returns the lines the NPC says.
+    """
+    import struct
+    u16 = lambda data, at: struct.unpack_from('<H', data, at)[0]
+    s16 = lambda value: value - 0x10000 if value & 0x8000 else value
+    code_size, reserved, import_count = u16(binary, 4), u16(binary, 12), u16(binary, 14)
+    pos = 16
+    functions, variables = {}, {}
+    for _ in range(import_count):
+        length = u16(binary, pos)
+        name = binary[pos + 2:pos + 2 + length].decode('ascii')
+        pos += 2 + length
+        item_id, kind = u16(binary, pos), u16(binary, pos + 4)
+        pos += 8
+        (functions if kind == 0x0111 else variables)[item_id] = name
+    code = [u16(binary, pos + 2 * i) for i in range(code_size)]
+
+    vm = UltimaUnderworldVM()
+    vm.load_string_blocks_text(strings_text)
+    strings = vm.string_blocks[min(vm.string_blocks)]
+    defaults = {name: default for name, _, default in GAME_GLOBALS}
+    defaults.update(game_values or {})
+
+    mem = [0] * 4096
+    for address, name in variables.items():
+        value = defaults[name]
+        if isinstance(value, str):
+            strings.append(value)
+            value = len(strings) - 1
+        mem[address] = value & 0xFFFF
+    state = {'sp': reserved, 'reg': 0}
+    quests = dict(quests or {})
+    answers = list(inputs)
+    said = []
+
+    def push(value):
+        state['sp'] += 1
+        mem[state['sp']] = value & 0xFFFF
+
+    def pop():
+        value = mem[state['sp']]
+        state['sp'] -= 1
+        return value
+
+    def text(string_id, depth=0):
+        def substitute(m):
+            source, kind, num = m.group(1), m.group(2), int(m.group(3))
+            address = num if source == 'G' else (regs['bp'] + num) & 0xFFFF
+            if source == 'P':
+                address = mem[address]
+            value = mem[address]
+            return str(s16(value)) if kind == 'I' else (text(value, depth + 1) if depth < 8 else strings[value])
+        return re.sub(r'@([GSP])([SI])(-?\d+)', substitute, strings[string_id])
+
+    def choice(count):
+        # like the VM: an invalid answer picks option 1
+        answer = answers.pop(0) if answers else None
+        if answer is None:
+            return None
+        return int(answer) if answer.isdigit() and 1 <= int(answer) <= count else 1
+
+    def imported(name):
+        argpos = state['sp']
+        argc = mem[argpos]
+        args = [mem[argpos - 1 - i] for i in range(argc)]   # pointers, arg1 first
+        value = lambda i: mem[args[i]]
+        if name == 'babl_menu':
+            options = []
+            while mem[args[0] + len(options)]:
+                options.append(mem[args[0] + len(options)])
+            picked = choice(len(options))
+            if picked is None:
+                raise StopIteration
+            return picked
+        if name == 'babl_fmenu':
+            shown = []
+            i = 0
+            while mem[args[0] + i]:
+                if mem[args[1] + i]:
+                    shown.append(i + 1)
+                i += 1
+            picked = choice(len(shown))
+            if picked is None:
+                raise StopIteration
+            return shown[picked - 1]
+        if name == 'babl_ask':
+            if not answers:
+                raise StopIteration
+            strings.append(answers.pop(0))
+            return len(strings) - 1
+        if name == 'compare':
+            return int(text(value(0)).strip().lower() == text(value(1)).strip().lower())
+        if name == 'contains':
+            return int(text(value(1)).lower() in text(value(0)).lower())
+        if name == 'length':
+            return len(text(value(0)))
+        if name == 'random':
+            return 1
+        if name == 'get_quest':
+            return quests.get(value(0), 0)
+        if name == 'set_quest':
+            quests[value(1)] = value(0)
+            return state['reg']
+        if name == 'sex':
+            return value(1)
+        return 1
+
+    regs = {'ip': 0, 'bp': 0xFFFF, 'level': 1}
+
+    def _reference_loop():
+        ip, level = regs['ip'], regs['level']
+        for _ in range(1000000):
+            op = code[ip]
+            name = OPCODE_NAMES[op]
+            if name in ('OPADD', 'OPMUL', 'OPSUB', 'OPDIV', 'OPMOD', 'OPOR', 'OPAND',
+                        'TSTGT', 'TSTGE', 'TSTLT', 'TSTLE', 'TSTEQ', 'TSTNE'):
+                b, a = s16(pop()), s16(pop())
+                quotient = int(a / b) if b else 0
+                push({'OPADD': a + b, 'OPMUL': a * b, 'OPSUB': a - b, 'OPDIV': quotient,
+                      'OPMOD': a - b * quotient if b else 0, 'OPOR': int(bool(a or b)),
+                      'OPAND': int(bool(a and b)), 'TSTGT': int(a > b), 'TSTGE': int(a >= b),
+                      'TSTLT': int(a < b), 'TSTLE': int(a <= b), 'TSTEQ': int(a == b),
+                      'TSTNE': int(a != b)}[name])
+            elif name == 'OPNOT':
+                push(int(pop() == 0))
+            elif name == 'OPNEG':
+                push(-s16(pop()))
+            elif name == 'JMP':
+                ip = code[ip + 1] - 1
+            elif name in ('BEQ', 'BNE'):
+                condition = pop()
+                if (condition == 0) == (name == 'BEQ'):
+                    ip = (ip + code[ip + 1]) & 0xFFFF
+                else:
+                    ip += 1
+            elif name == 'BRA':
+                ip = (ip + code[ip + 1]) & 0xFFFF
+            elif name == 'CALL':
+                push(ip + 1)
+                ip = code[ip + 1] - 1
+                level += 1
+            elif name == 'CALLI':
+                ip += 1
+                state['reg'] = imported(functions[code[ip]]) & 0xFFFF
+            elif name == 'RET':
+                level -= 1
+                if level == 0:
+                    break
+                ip = pop()
+            elif name == 'PUSHI':
+                ip += 1
+                push(code[ip])
+            elif name == 'PUSHI_EFF':
+                ip += 1
+                push(regs['bp'] + s16(code[ip]))
+            elif name == 'POP':
+                pop()
+            elif name == 'SWAP':
+                a, b = pop(), pop()
+                push(a)
+                push(b)
+            elif name == 'PUSHBP':
+                push(regs['bp'])
+            elif name == 'POPBP':
+                regs['bp'] = pop()
+            elif name == 'SPTOBP':
+                regs['bp'] = state['sp']
+            elif name == 'BPTOSP':
+                state['sp'] = regs['bp']
+            elif name == 'ADDSP':
+                for _ in range(pop()):
+                    push(0xDDDD)
+            elif name == 'FETCHM':
+                push(mem[pop()])
+            elif name == 'STO':
+                value = pop()
+                mem[pop()] = value
+            elif name == 'SAVE_REG':
+                state['reg'] = pop()
+            elif name == 'PUSH_REG':
+                push(state['reg'])
+            elif name == 'SAY_OP':
+                said.append(text(pop()))
+            elif name == 'EXIT_OP':
+                break
+            elif name not in ('NOP', 'START'):
+                raise AssertionError(f"reference VM: unsupported opcode {name}")
+            ip += 1
+            if ip >= len(code):
+                break
+
+
+    try:
+        _reference_loop()
+    except StopIteration:
+        pass  # out of player input, like the VM
+    return said
+
+
+def assemble(assembly):
+    """Assemble with the game tool tools/conversations/uw_cnv_compiler.py"""
+    sys.path.insert(0, os.path.join(UWSCRIPT_DIR, '..', 'tools', 'conversations'))
+    from uw_cnv_compiler import ConversationCompiler
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'program.asm')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(assembly)
+        compiler = ConversationCompiler(path, os.path.join(tmp, 'program.bin'))
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert compiler.parse_asm()
+        return bytes(compiler.build_binary())
+
+
+class TestGameCompatibility(unittest.TestCase):
+    """The output loads and runs like a conversation in the game."""
+
+    SAMPLE_INPUTS = ['1', 'echo', '2', '1', '3', '2', '1', '2'] * 3
+
+    def test_samples_run_the_same_on_the_reference_vm(self):
+        samples = sorted(glob.glob(os.path.join(UWSCRIPT_DIR, 'samples', '*.uws')))
+        for path in samples:
+            with self.subTest(sample=os.path.basename(path)):
+                with open(path, encoding='utf-8') as f:
+                    source = f.read()
+                result = compile_uwscript(source)
+                said = run(source, inputs=self.SAMPLE_INPUTS)[0]
+                reference = reference_run(assemble(result['assembly']), result['strings'],
+                                          inputs=self.SAMPLE_INPUTS)
+                self.assertEqual(reference, said)
+
+    def test_binary_header_and_imports(self):
+        import struct
+        result = compile_uwscript('''
+let gold = 5
+menu c ["a", "b"]
+set_quest(3, gold)
+say "Hello " + play_name
+''')
+        binary = assemble(result['assembly'])
+        memory_slots = int(re.search(r'; Memory Slots: (\d+)', result['assembly']).group(1))
+        self.assertEqual(struct.unpack_from('<H', binary, 12)[0], memory_slots)
+        self.assertGreaterEqual(memory_slots, GLOBALS_BASE + 1)
+        self.assertEqual(struct.unpack_from('<H', binary, 14)[0], 3)
+        for name in (b'babl_menu', b'set_quest', b'play_name'):
+            self.assertIn(name, binary)
+
+    def test_decompiled_binary_runs_the_same(self):
+        sys.path.insert(0, os.path.join(UWSCRIPT_DIR, '..', 'tools', 'conversations'))
+        from uw_cnv_decompiler import decompile_binary_file
+        path = os.path.join(UWSCRIPT_DIR, 'samples', 'conversation_riddle_master.uws')
+        with open(path, encoding='utf-8') as f:
+            result = compile_uwscript(f.read())
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = os.path.join(tmp, 'riddle.bin')
+            with open(binary, 'wb') as f:
+                f.write(assemble(result['assembly']))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(decompile_binary_file(binary, os.path.join(tmp, 'riddle.asm')))
+            with open(os.path.join(tmp, 'riddle.asm'), encoding='utf-8') as f:
+                decompiled = f.read()
+        self.assertIn('; Memory Slots:', decompiled)
+        inputs = ['1', 'echo', '1', '1', 'footsteps', '2']
+        original = run_assembly(result['assembly'], result['strings'], inputs)
+        self.assertEqual(run_assembly(decompiled, result['strings'], inputs), original)
+        self.assertIn("Correct! Your mind is sharper than most who wander these halls.", original)
+
+    def test_locals_start_after_the_saved_frame_pointer(self):
+        assembly = compile_uwscript('function f(a)\n    let x = a\n    return x\nendfunction\nsay "" + f(4)')['assembly']
+        self.assertIn('PUSHI_EFF 1', assembly)
+        self.assertNotIn('PUSHI_EFF 0\n', assembly)
+
+
+def run_assembly(assembly, strings, inputs):
+    vm = UltimaUnderworldVM()
+    answers = list(inputs)
+    vm.input_func = lambda prompt='': answers.pop(0) if answers else (_ for _ in ()).throw(EOFError)
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        assert vm.load_string_blocks_text(strings)
+        assert vm.parse_asm_text(assembly)
+        vm.initialize_memory()
+        vm.execute()
+    return re.findall(r'^NPC: "(.*?)"$', output.getvalue(), re.M | re.S)
+
+
+class TestGameGlobalsAndFunctions(unittest.TestCase):
+
+    def test_game_globals(self):
+        said, _, vm = run('''
+if npc_talkedto == 0
+    say "Greetings, " + play_name + ". I am " + npc_name + "."
+endif
+npc_talkedto = 1
+npc_attitude -= 1
+''')
+        self.assertEqual(said, ["Greetings, Avatar. I am Stranger."])
+        self.assertEqual(vm.game_values['npc_talkedto'], 1)
+        self.assertEqual(vm.game_values['npc_attitude'], 1)
+
+    def test_game_globals_cannot_be_redeclared(self):
+        with self.assertRaisesRegex(UWScriptError, "game global"):
+            compile_uwscript('let npc_attitude = 3')
+
+    def test_saved_globals(self):
+        source = 'let visits\nvisits += 1\nsay "Visit " + visits'
+        with tempfile.TemporaryDirectory() as tmp:
+            state = os.path.join(tmp, 'state.json')
+            for expected in ("Visit 1", "Visit 2"):
+                vm = UltimaUnderworldVM()
+                vm.globals_file = state
+                if os.path.exists(state):
+                    vm.load_state(state)
+                result = compile_uwscript(source)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    vm.load_string_blocks_text(result['strings'])
+                    vm.parse_asm_text(result['assembly'])
+                    vm.initialize_memory()
+                    vm.execute()
+                self.assertIn(f'NPC: "{expected}"', output.getvalue())
+        with self.assertRaisesRegex(UWScriptError, "need a value"):
+            compile_uwscript('function f()\n    let x\nendfunction')
+
+    def test_more_imported_functions(self):
+        said, text, _ = run('''
+say "You look " + sex("lovely", "strong") + "."
+print("The goblin scratches its head.")
+setup_to_barter()
+if do_offer(1, 2, 3, 4, 5)
+    say "Deal."
+endif
+if find_inv(1, 128)
+    say "A sword!"
+endif
+''')
+        self.assertEqual(said, ["You look strong.", "Deal."])
+        self.assertIn('PRINT: "The goblin scratches its head."', text)
+
+    def test_void_functions_have_no_value(self):
+        with self.assertRaisesRegex(UWScriptError, "does not return a value"):
+            compile_uwscript('let x = set_quest(1, 2)')
+
+    def test_print_overloads(self):
+        self.assertIn("CALLI 2", compile_uwscript('print("hi")')['assembly'])
+        with self.assertRaisesRegex(UWScriptError, "fantasy console"):
+            compile_uwscript('print(1, 2, "hi", 3)')
 
 
 class TestSamplesAndCommandLine(unittest.TestCase):

@@ -7,6 +7,7 @@ and decompiles the code section to human-readable assembler.
 """
 
 import os
+import sys
 import struct
 import argparse
 from pathlib import Path
@@ -134,93 +135,110 @@ class ConversationDecompiler:
         # Track labels for jumps and calls
         self.labels = {}
         
-    def decompile(self, code_data):
+    def decompile(self, code_data, imports=None):
         """
         Decompile bytecode to assembly instructions.
-        
+
+        Jump targets get labels: JMP and CALL take absolute word addresses,
+        BEQ/BNE/BRA are relative to their operand word (target = address of
+        the instruction + 1 + offset), as in the game's VM.
+
         Args:
             code_data (bytes): The binary code section
-            
+            imports (list): import records, to name CALLI targets
+
         Returns:
             list: Decompiled assembly instructions
         """
-        # First pass - find potential jump targets and create labels
-        self._find_jump_targets(code_data)
-        
-        # Second pass - decompile instructions
-        instructions = []
-        pos = 0
-        
-        while pos < len(code_data):
-            label = self.labels.get(pos, "")
-            if label:
-                instructions.append(f"{label}:")
-            
-            # Each instruction is at least 2 bytes
-            if pos + 2 > len(code_data):
-                instructions.append(f"; ERROR: Truncated instruction at offset {pos}")
-                break
-                
-            # Read opcode (first byte)
-            opcode = code_data[pos]
-            
-            # Get information about this opcode
-            op_info = self.opcodes.get(opcode, {"name": f"UNKNOWN_{opcode:02X}", "operands": 0})
-            
-            # Format the instruction based on the opcode
-            if opcode in self.instruction_patterns:
-                if op_info["operands"] > 0 and pos + 2 + (op_info["operands"] * 2) <= len(code_data):
-                    # Read operand (next 2 bytes after opcode)
-                    operand = struct.unpack("<H", code_data[pos+2:pos+4])[0]
-                    
-                    # Format the instruction
-                    pattern = self.instruction_patterns[opcode]
-                    instr = pattern(opcode).format(operand)
-                    
-                    # For jumps and calls, add label reference if we have one
-                    if opcode in [0x0F, 0x10, 0x11, 0x12, 0x13] and operand * 2 in self.labels:
-                        instr += f"  ; -> {self.labels[operand * 2]}"
-                    
-                    instructions.append(instr)
-                    pos += 4  # Skip opcode and operand
-                else:
-                    # Missing operand
-                    instructions.append(f"{op_info['name']}  ; ERROR: Missing operand")
-                    pos += 2  # Skip opcode
+        words = [struct.unpack("<H", code_data[i:i + 2])[0] for i in range(0, len(code_data) - 1, 2)]
+        function_names = {imp['id_or_addr']: imp['name'] for imp in (imports or []) if imp.get('is_function')}
+
+        # First pass: instruction starts and jump targets (word addresses)
+        starts, targets, calls = set(), set(), set()
+        pc = 0
+        while pc < len(words):
+            starts.add(pc)
+            opcode = words[pc]
+            if self.opcodes.get(opcode, {"operands": 0})["operands"] and pc + 1 < len(words):
+                target = self._jump_target(opcode, pc, words[pc + 1])
+                if target is not None:
+                    targets.add(target)
+                    if opcode == 0x13:
+                        calls.add(target)
+                pc += 2
             else:
-                # Opcode without operands or unknown opcode
-                instructions.append(op_info["name"])
-                pos += 2  # Skip opcode
-                
-        return instructions
-    
-    def _find_jump_targets(self, code_data):
-        """Find jump targets and create labels."""
+                pc += 1
+
         self.labels = {}
-        pos = 0
-        label_counter = 0
-        
-        while pos < len(code_data):
-            if pos + 2 > len(code_data):
+        for target in sorted(targets & starts):
+            prefix = "func" if target in calls else "label"
+            self.labels[target] = f"{prefix}_{target:04x}"
+
+        # Second pass: instructions
+        instructions = []
+        pc = 0
+        while pc < len(words):
+            if pc in self.labels:
+                instructions.append(f"{self.labels[pc]}:")
+            opcode = words[pc]
+            op_info = self.opcodes.get(opcode, {"name": f"UNKNOWN_{opcode:02X}", "operands": 0})
+            name = op_info["name"]
+            if not op_info["operands"]:
+                instructions.append(name)
+                pc += 1
+                continue
+            if pc + 1 >= len(words):
+                instructions.append(f"; ERROR: {name} at {pc:04x} is missing its operand")
                 break
-                
-            opcode = code_data[pos]
-            op_info = self.opcodes.get(opcode, {"operands": 0})
-            
-            # Check if this is a jump or call instruction
-            if opcode in [0x0F, 0x10, 0x11, 0x12, 0x13]:  # JMP, BEQ, BNE, BRA, CALL
-                if pos + 4 <= len(code_data):
-                    # Get the target address
-                    target = struct.unpack("<H", code_data[pos+2:pos+4])[0]
-                    target_pos = target * 2  # Convert instruction index to byte offset
-                    
-                    # Create a label if we don't have one already
-                    if target_pos not in self.labels:
-                        self.labels[target_pos] = f"label_{label_counter}"
-                        label_counter += 1
-            
-            # Move to next instruction
-            pos += 2 + (op_info["operands"] * 2)
+            operand = words[pc + 1]
+            target = self._jump_target(opcode, pc, operand)
+            if target is not None and target in self.labels:
+                instructions.append(f"{name} {self.labels[target]}")
+            elif target is not None:
+                instructions.append(f"{name} 0x{operand:04X}  ; target 0x{target:04X} is not an instruction")
+            elif opcode == 0x14:  # CALLI
+                comment = f"  ; {function_names[operand]}" if operand in function_names else ""
+                instructions.append(f"{name} {operand}{comment}")
+            elif opcode == 0x17:  # PUSHI_EFF: signed frame offset
+                instructions.append(f"{name} {operand - 0x10000 if operand >= 0x8000 else operand}")
+            else:
+                instructions.append(f"{name} 0x{operand:04X}")
+            pc += 2
+
+        return instructions
+
+    @staticmethod
+    def _jump_target(opcode, pc, operand):
+        """Word address a jump/branch/call goes to, or None"""
+        if opcode in (0x0F, 0x13):  # JMP, CALL
+            return operand
+        if opcode in (0x10, 0x11, 0x12):  # BEQ, BNE, BRA
+            offset = operand - 0x10000 if operand >= 0x8000 else operand
+            return (pc + 1 + offset) & 0xFFFF
+        return None
+
+
+def write_asm(out, header, imports, instructions, slot_idx=None, source=None):
+    """Write a decompiled conversation in the format uw_cnv_compiler.py reads back"""
+    out.write("; Decompiled conversation script\n")
+    if source:
+        out.write(f"; Binary File: {source}\n")
+    if slot_idx is not None:
+        out.write(f"; Slot: {slot_idx:04X}\n")
+    out.write(f"; String Block: {header['string_block']}\n")
+    out.write(f"; Memory Slots: {header['memory_slots']}\n\n")
+    out.write("; Imported Functions/Variables:\n")
+    return_names = {0x0000: "void", 0x0129: "int", 0x012B: "string"}
+    for i, imp in enumerate(imports):
+        if imp["is_function"]:
+            returns = return_names.get(imp["return_type"], "int")
+            out.write(f"; Import {i}: Function {imp['name']}, ID: {imp['id_or_addr']}, Returns: {returns}\n")
+        elif imp["is_variable"]:
+            out.write(f"; Import {i}: Variable {imp['name']}, Addr: 0x{imp['id_or_addr']:04X}\n")
+    out.write("\n")
+    for instr in instructions:
+        out.write(f"{instr}\n")
+
 
 class ConversationExtractor:
     def __init__(self, filename, output_dir="conversations", verbose=False):
@@ -310,7 +328,7 @@ class ConversationExtractor:
         code_data = f.read(header["code_size"] * 2)  # Each instruction is 2 bytes
         
         # Decompile the code section
-        decompiled_code = self.decompiler.decompile(code_data)
+        decompiled_code = self.decompiler.decompile(code_data, imports)
         
         # Store the conversation data
         conversation = {
@@ -430,23 +448,8 @@ class ConversationExtractor:
         # Also write assembly file
         asm_filename = os.path.join(self.output_dir, f"conversation_{slot_idx:04X}.asm")
         with open(asm_filename, "w", encoding="utf-8") as f:
-            f.write("; Decompiled conversation script\n")
-            f.write(f"; Slot: {slot_idx:04X}\n")
-            f.write(f"; String Block: {conversation['header']['string_block']}\n\n")
-            
-            # Write imports as comments
-            f.write("; Imported Functions/Variables:\n")
-            for i, imp in enumerate(conversation["imports"]):
-                if imp["is_function"]:
-                    f.write(f"; Import {i}: Function {imp['name']}, ID: {imp['id_or_addr']}, Returns: {imp['return_type_name']}\n")
-                elif imp["is_variable"]:
-                    f.write(f"; Import {i}: Variable {imp['name']}, Addr: 0x{imp['id_or_addr']:04X}\n")
-            
-            f.write("\n")
-            
-            # Write decompiled code
-            for instr in conversation["decompiled_code"]:
-                f.write(f"{instr}\n")
+            write_asm(f, conversation["header"], conversation["imports"], conversation["decompiled_code"],
+                      slot_idx=slot_idx)
 
 def decompile_binary_file(binary_file, output_file=None, verbose=False):
     """Decompile a single binary conversation file."""
@@ -507,27 +510,11 @@ def decompile_binary_file(binary_file, output_file=None, verbose=False):
                 print(f"Code section: {len(code_data)} bytes")
             
             # Decompile the code section
-            decompiled_code = decompiler.decompile(code_data)
+            decompiled_code = decompiler.decompile(code_data, imports)
             
             # Write the decompiled assembly
             with open(output_file, 'w', encoding='utf-8') as out_file:
-                out_file.write("; Decompiled conversation script\n")
-                out_file.write(f"; Binary File: {os.path.basename(binary_file)}\n")
-                out_file.write(f"; String Block: {header['string_block']}\n\n")
-                
-                # Write imports as comments
-                out_file.write("; Imported Functions/Variables:\n")
-                for i, imp in enumerate(imports):
-                    if imp["is_function"]:
-                        out_file.write(f"; Import {i}: Function {imp['name']}, ID: {imp['id_or_addr']}\n")
-                    elif imp["is_variable"]:
-                        out_file.write(f"; Import {i}: Variable {imp['name']}, Addr: 0x{imp['id_or_addr']:04X}\n")
-                
-                out_file.write("\n")
-                
-                # Write decompiled code
-                for instr in decompiled_code:
-                    out_file.write(f"{instr}\n")
+                write_asm(out_file, header, imports, decompiled_code, source=os.path.basename(binary_file))
             
             print(f"Decompiled code written to {output_file}")
             return True
@@ -571,4 +558,4 @@ def main():
     return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

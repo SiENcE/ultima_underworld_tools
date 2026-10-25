@@ -18,16 +18,19 @@ import sys
 from enum import Enum, auto
 from typing import Dict, List, Optional
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from uw_engine import (FUNCTION_IDS, GAME_GLOBALS, GAME_GLOBAL_ADDRESSES, IMPORTED_FUNCTIONS,  # noqa: E402
+                       PRIVATE_GLOBALS_BASE)
+
 # Compilation targets: 'uw' produces conversations the original game can run;
 # 'console' also allows the fantasy console functions and VM extensions.
 TARGETS = ('uw', 'console')
 
-# Absolute address of the first UWScript global. It matches the frame pointer
-# the VM starts the main program with, so globals sit right after the
-# imported game globals and the conversation's private memory slots.
-GLOBALS_BASE = 96
-# The VM's initial stack pointer. Globals and hidden slots must end below it.
-STACK_BASE = 4192
+# Absolute address of the first UWScript global: the conversation's private
+# globals start after the game globals (0..30), as in the game.
+GLOBALS_BASE = PRIVATE_GLOBALS_BASE
+# Upper limit for the memory slots (globals); the stack follows them.
+MAX_MEMORY_SLOTS = 0x8000
 MAX_WORD = 65535
 
 
@@ -410,13 +413,23 @@ class Parser:
     def _parse_variable_declaration(self) -> VariableDeclaration:
         let_token = self._expect(TokenType.KEYWORD, 'let')
         name_token = self._expect(TokenType.IDENTIFIER, what="variable name")
-        self._expect(TokenType.OPERATOR, '=')
-        value = self._parse_expression()
-        self._end_statement()
-
         node = VariableDeclaration(let_token)
         node.name = name_token.value
-        node.add_child(value)
+
+        # "let name" without a value declares a saved global: it keeps the
+        # value from the last conversation (0 the first time)
+        while self._match(TokenType.COMMENT):
+            self.pos += 1
+        if self._match(TokenType.EOL) or self._match(TokenType.EOF):
+            if self.function_depth > 0:
+                self._error("Local variables need a value (only globals can be declared without one)",
+                            name_token)
+            self._end_statement()
+            return node
+
+        self._expect(TokenType.OPERATOR, '=')
+        node.add_child(self._parse_expression())
+        self._end_statement()
         return node
 
     def _parse_if_statement(self) -> IfStatement:
@@ -751,55 +764,102 @@ class Builtin:
                   argument sits right below the argument count.
       'console' - first argument first (what the fantasy console expects).
     `engine_args` maps the UWScript argument order to the engine's order.
+    `import_name` is the name in the conversation's import table (the game
+    looks functions up by name), `returns` is 'int', 'string' or 'void'.
     """
 
     def __init__(self, func_id: int, min_args: int, max_args: Optional[int] = None,
-                 order: str = 'engine', engine_args: Optional[tuple] = None):
+                 order: str = 'engine', engine_args: Optional[tuple] = None,
+                 import_name: Optional[str] = None, returns: Optional[str] = None):
         self.id = func_id
         self.min_args = min_args
         self.max_args = min_args if max_args is None else max_args
         self.order = order
         self.engine_args = engine_args
+        engine_name, engine_returns = IMPORTED_FUNCTIONS.get(func_id, (None, 'int'))
+        self.import_name = import_name or engine_name
+        self.returns = returns or (engine_returns if order == 'engine' else 'int')
 
 
-BUILTINS: Dict[str, Builtin] = {
-    # Ultima Underworld imported functions
-    'compare': Builtin(4, 2),
-    'random': Builtin(5, 1),
-    'contains': Builtin(7, 2),
-    'string_length': Builtin(11, 1),
-    'get_quest': Builtin(15, 1),
+def _uw(name: str, min_args: int, max_args: Optional[int] = None, **kwargs) -> Builtin:
+    return Builtin(FUNCTION_IDS[name], min_args, max_args, **kwargs)
+
+
+def _console(func_id: int, name: str, min_args: int, max_args: Optional[int] = None) -> Builtin:
+    return Builtin(func_id, min_args, max_args, order='console', import_name=f"console_{name}")
+
+
+# UWScript name -> overloads (chosen by the number of arguments)
+BUILTINS: Dict[str, List[Builtin]] = {
+    # Ultima Underworld: strings and dialogue
+    'print': [_uw('print', 1), _console(107, 'print', 4)],
+    'compare': [_uw('compare', 2)],
+    'contains': [_uw('contains', 2)],
+    'string_length': [_uw('length', 1)],
+    'sex': [_uw('sex', 2)],
+    # Ultima Underworld: quests, randomness and the world
+    'random': [_uw('random', 1)],
+    'get_quest': [_uw('get_quest', 1)],
     # UWScript: set_quest(quest, value); the engine takes (value, quest)
-    'set_quest': Builtin(16, 2, engine_args=(1, 0)),
-    'gronk_door': Builtin(37, 3),
+    'set_quest': [_uw('set_quest', 2, engine_args=(1, 0))],
+    'gronk_door': [_uw('gronk_door', 3)],
+    'place_object': [_uw('place_object', 3)],
+    'remove_talker': [_uw('remove_talker', 0)],
+    'set_attitude': [_uw('set_attitude', 2)],
+    'set_race_attitude': [_uw('set_race_attitude', 1, 3)],
+    'x_skills': [_uw('x_skills', 2)],
+    'x_traps': [_uw('x_traps', 2)],
+    'x_obj_stuff': [_uw('x_obj_stuff', 9)],
+    # Ultima Underworld: inventory and bartering
+    'show_inv': [_uw('show_inv', 2)],
+    'give_to_npc': [_uw('give_to_npc', 2)],
+    'give_ptr_npc': [_uw('give_ptr_npc', 2)],
+    'take_from_npc': [_uw('take_from_npc', 1)],
+    'take_id_from_npc': [_uw('take_id_from_npc', 1)],
+    'take_from_npc_inv': [_uw('take_from_npc_inv', 1)],
+    'identify_inv': [_uw('identify_inv', 4)],
+    'do_offer': [_uw('do_offer', 5, 7)],
+    'do_demand': [_uw('do_demand', 2)],
+    'do_inv_create': [_uw('do_inv_create', 1)],
+    'do_inv_delete': [_uw('do_inv_delete', 1)],
+    'check_inv_quality': [_uw('check_inv_quality', 1)],
+    'set_inv_quality': [_uw('set_inv_quality', 2)],
+    'count_inv': [_uw('count_inv', 1)],
+    'setup_to_barter': [_uw('setup_to_barter', 0)],
+    'do_judgement': [_uw('do_judgement', 0)],
+    'do_decline': [_uw('do_decline', 0)],
+    'set_likes_dislikes': [_uw('set_likes_dislikes', 2)],
+    'find_inv': [_uw('find_inv', 2)],
+    'find_barter': [_uw('find_barter', 1)],
+    'find_barter_total': [_uw('find_barter_total', 4)],
 
     # Fantasy console: graphics
-    'clear_screen': Builtin(100, 0, 1, order='console'),
-    'set_pixel': Builtin(101, 3, order='console'),
-    'draw_line': Builtin(102, 5, order='console'),
-    'draw_rect': Builtin(103, 5, order='console'),
-    'fill_rect': Builtin(104, 5, order='console'),
-    'draw_circle': Builtin(105, 4, order='console'),
-    'draw_sprite': Builtin(106, 3, order='console'),
-    'print': Builtin(107, 4, order='console'),
-    'fill_circle': Builtin(108, 4, order='console'),
-    'flip_display': Builtin(109, 0, order='console'),
-    'get_pixel': Builtin(110, 2, order='console'),
+    'clear_screen': [_console(100, 'clear_screen', 0, 1)],
+    'set_pixel': [_console(101, 'set_pixel', 3)],
+    'draw_line': [_console(102, 'draw_line', 5)],
+    'draw_rect': [_console(103, 'draw_rect', 5)],
+    'fill_rect': [_console(104, 'fill_rect', 5)],
+    'draw_circle': [_console(105, 'draw_circle', 4)],
+    'draw_sprite': [_console(106, 'draw_sprite', 3)],
+    'fill_circle': [_console(108, 'fill_circle', 4)],
+    'flip_display': [_console(109, 'flip_display', 0)],
+    'get_pixel': [_console(110, 'get_pixel', 2)],
     # Fantasy console: sound, input, math, system
-    'play_tone': Builtin(200, 3, order='console'),
-    'is_key_pressed': Builtin(300, 1, order='console'),
-    'is_key_released': Builtin(301, 1, order='console'),
-    'math_sin': Builtin(501, 1, order='console'),
-    'math_cos': Builtin(502, 1, order='console'),
-    'math_sqrt': Builtin(503, 1, order='console'),
-    'delay': Builtin(900, 1, order='console'),
-    'get_frame': Builtin(901, 0, order='console'),
+    'play_tone': [_console(200, 'play_tone', 3)],
+    'is_key_pressed': [_console(300, 'is_key_pressed', 1)],
+    'is_key_released': [_console(301, 'is_key_released', 1)],
+    'math_sin': [_console(501, 'math_sin', 1)],
+    'math_cos': [_console(502, 'math_cos', 1)],
+    'math_sqrt': [_console(503, 'math_sqrt', 1)],
+    'delay': [_console(900, 'delay', 1)],
+    'get_frame': [_console(901, 'get_frame', 0)],
 }
 
-BABL_MENU = 0
-BABL_FMENU = 1
-BABL_ASK = 3
-# UWScript VM only: expands a string template now and returns the id of the resulting text
+BABL_MENU = FUNCTION_IDS['babl_menu']
+BABL_FMENU = FUNCTION_IDS['babl_fmenu']
+BABL_ASK = FUNCTION_IDS['babl_ask']
+# Fantasy console / UWScript VM only: expands a string template now and
+# returns the id of the resulting text
 FREEZE_STRING = 600
 
 ARITHMETIC_OPS = {'+': 'OPADD', '-': 'OPSUB', '*': 'OPMUL', '/': 'OPDIV', '%': 'OPMOD'}
@@ -847,8 +907,8 @@ class Symbol:
     def __init__(self, name: str, kind: str, offset: int, size: int = 1,
                  dims: Optional[List[int]] = None, vtype: str = 'int', elem_type: str = 'int'):
         self.name = name
-        self.kind = kind          # 'global', 'local' or 'param'
-        self.offset = offset      # global index, frame offset or parameter offset
+        self.kind = kind          # 'global', 'game', 'local' or 'param'
+        self.offset = offset      # global index, game global address, frame offset or parameter offset
         self.size = size
         self.dims = dims          # array dimensions, None for scalars
         self.vtype = vtype        # 'int' or 'string' (scalars)
@@ -889,8 +949,8 @@ class FunctionInfo:
 
         count = len(self.params)
         for i, param in enumerate(self.params):
-            # Frame: [arg0 .. argN-1] [return address] [saved BP] <- BP
-            # PUSHI_EFF k (k < 0) addresses BP + k - 1, so argument i is at k = -(1 + N - i).
+            # Frame: [arg0 .. argN-1] [return address] [saved BP] <- BP, locals at BP+1..
+            # so argument i is at PUSHI_EFF -(1 + N - i).
             self.symbols[param] = Symbol(param, 'param', -(1 + count - i))
 
     @property
@@ -932,6 +992,13 @@ class CodeGenerator:
         self.snapshot_slots: List[HiddenSlot] = []
         self.warnings: List[str] = []
 
+        # Game globals (play_name, npc_attitude, ...) are predefined variables
+        self.game_globals: Dict[str, Symbol] = {
+            name: Symbol(name, 'game', GAME_GLOBAL_ADDRESSES[name], vtype=vtype)
+            for name, vtype, _ in GAME_GLOBALS}
+        self.used_game_globals = set()
+        self.used_functions: Dict[int, tuple] = {}   # CALLI id -> (import name, return type)
+
     # -- entry point --------------------------------------------------------
 
     def generate(self, ast: Program, string_block: int = 1) -> str:
@@ -960,6 +1027,8 @@ class CodeGenerator:
             if isinstance(stmt, FunctionDefinition):
                 if stmt.name in BUILTINS:
                     raise UWScriptError(f"'{stmt.name}' is a built-in function and cannot be redefined", stmt.line)
+                if stmt.name in self.game_globals:
+                    raise UWScriptError(f"'{stmt.name}' is a game global and cannot be a function name", stmt.line)
                 if stmt.name in self.functions:
                     raise UWScriptError(f"Function '{stmt.name}' is already defined", stmt.line)
                 self.functions[stmt.name] = FunctionInfo(stmt)
@@ -983,9 +1052,9 @@ class CodeGenerator:
             self._infer_parameter_types(ast)
         self.scope = None
 
-        if GLOBALS_BASE + self.global_size > STACK_BASE:
+        if GLOBALS_BASE + self.global_size > MAX_MEMORY_SLOTS:
             raise UWScriptError(f"Global variables need {self.global_size} memory slots, "
-                                f"but only {STACK_BASE - GLOBALS_BASE} are available")
+                                f"but only {MAX_MEMORY_SLOTS - GLOBALS_BASE} are available")
 
     def _collect_labels(self, statements, labels: set):
         for stmt in self._walk_statements(statements):
@@ -1006,9 +1075,11 @@ class CodeGenerator:
     def _collect_declarations(self, statements):
         for stmt in self._walk_statements(statements):
             if isinstance(stmt, VariableDeclaration):
-                self._declare(stmt.name, stmt.children[0], stmt)
+                self._declare(stmt.name, stmt.children[0] if stmt.children else None, stmt)
             elif isinstance(stmt, (AskStatement, MenuStatement, FilterMenuStatement)) and stmt.variable:
                 vtype = 'string' if isinstance(stmt, AskStatement) else 'int'
+                if stmt.variable in self.game_globals:
+                    continue
                 # Like an assignment, these write an existing global from inside a function
                 if self.scope and stmt.variable not in self.scope.symbols and stmt.variable in self.globals:
                     if vtype == 'string':
@@ -1019,6 +1090,8 @@ class CodeGenerator:
     def _declare(self, name: str, init, stmt, vtype: Optional[str] = None):
         if name in BUILTINS or name in self.functions:
             raise UWScriptError(f"'{name}' is a function name and cannot be used as a variable", stmt.line)
+        if name in self.game_globals:
+            raise UWScriptError(f"'{name}' is a game global; assign it without 'let'", stmt.line)
         table = self.scope.symbols if self.scope else self.globals
 
         if isinstance(init, ArrayLiteral):
@@ -1052,7 +1125,7 @@ class CodeGenerator:
 
     def _allocate(self, size: int) -> int:
         if self.scope:
-            offset = self.scope.local_size
+            offset = 1 + self.scope.local_size   # BP + 0 holds the saved frame pointer
             self.scope.local_size += size
         else:
             offset = self.global_size
@@ -1113,7 +1186,9 @@ class CodeGenerator:
     def _lookup(self, name: str) -> Optional[Symbol]:
         if self.scope and name in self.scope.symbols:
             return self.scope.symbols[name]
-        return self.globals.get(name)
+        if name in self.globals:
+            return self.globals[name]
+        return self.game_globals.get(name)
 
     def _require(self, name: str, node) -> Symbol:
         sym = self._lookup(name)
@@ -1144,6 +1219,9 @@ class CodeGenerator:
             return 'string' if self._is_concat(node) else 'int'
         if isinstance(node, FunctionCall) and node.name in self.functions:
             return self._function_return_type(self.functions[node.name])
+        if isinstance(node, FunctionCall) and node.name in BUILTINS:
+            overloads = [b for b in BUILTINS[node.name] if b.min_args <= len(node.arguments) <= b.max_args]
+            return 'string' if overloads and overloads[0].returns == 'string' else 'int'
         return 'int'
 
     def _function_return_type(self, info: FunctionInfo) -> str:
@@ -1174,6 +1252,9 @@ class CodeGenerator:
     def _loc(self, sym: Symbol) -> Loc:
         if sym.kind == 'global':
             return Loc(False, GLOBALS_BASE + sym.offset)
+        if sym.kind == 'game':
+            self.used_game_globals.add(sym.name)
+            return Loc(False, sym.offset)
         return Loc(True, sym.offset)
 
     def _alloc_temps(self, count: int) -> int:
@@ -1186,7 +1267,7 @@ class CodeGenerator:
 
     def _temp_loc(self, index: int) -> Loc:
         if self.scope:
-            return Loc(True, self.scope.local_size + index)
+            return Loc(True, 1 + self.scope.local_size + index)
         slot = self.main_temp_slots.get(index)
         if slot is None:
             slot = self.main_temp_slots[index] = HiddenSlot('temp', index)
@@ -1202,11 +1283,7 @@ class CodeGenerator:
 
     def _subst_ref(self, loc: Loc, vtype: str) -> SubstRef:
         kind = 'S' if vtype == 'string' else 'I'
-        if not loc.frame:
-            return SubstRef('G', kind, loc.value)
-        # Text substitution reads BP + n directly, without the extra -1 that
-        # PUSHI_EFF applies to negative offsets.
-        return SubstRef('S', kind, loc.value if loc.value >= 0 else loc.value - 1)
+        return SubstRef('S' if loc.frame else 'G', kind, loc.value)
 
     # -- strings ------------------------------------------------------------
 
@@ -1253,6 +1330,8 @@ class CodeGenerator:
     def _gen_statement(self, node):
         if isinstance(node, VariableDeclaration):
             sym = self._require(node.name, node)
+            if not node.children:
+                return  # a saved global keeps its value
             init = node.children[0]
             if isinstance(init, ArrayLiteral):
                 self._gen_array_init(sym, init)
@@ -1306,6 +1385,7 @@ class CodeGenerator:
             self._emit("SAY_OP")
 
         elif isinstance(node, AskStatement):
+            self._use_function(BABL_ASK, 'babl_ask', 'int')
             self._emit("PUSHI", 0)
             self._emit("CALLI", BABL_ASK)
             self._emit("POP")
@@ -1459,6 +1539,7 @@ class CodeGenerator:
 
         self._emit_addr(self._temp_loc(block))
         self._emit("PUSHI", 1)
+        self._use_function(BABL_MENU, 'babl_menu', 'int')
         self._emit("CALLI", BABL_MENU)
         self._emit("POP")
         self._emit("POP")
@@ -1485,6 +1566,7 @@ class CodeGenerator:
         self._emit_addr(self._temp_loc(flags))
         self._emit_addr(self._temp_loc(strings))
         self._emit("PUSHI", 2)
+        self._use_function(BABL_FMENU, 'babl_fmenu', 'int')
         self._emit("CALLI", BABL_FMENU)
         self._emit("POP")
         self._emit("POP")
@@ -1516,9 +1598,24 @@ class CodeGenerator:
         self.function_code.extend(body)
         self.scope = None
 
+    def _select_builtin(self, node: FunctionCall) -> Builtin:
+        """The overload of a built-in function that matches the argument count"""
+        count = len(node.arguments)
+        overloads = BUILTINS[node.name]
+        for builtin in overloads:
+            if builtin.min_args <= count <= builtin.max_args:
+                return builtin
+        expected = ' or '.join(str(b.min_args) if b.min_args == b.max_args else f"{b.min_args} to {b.max_args}"
+                               for b in overloads)
+        raise UWScriptError(f"Function '{node.name}' expects {expected} argument(s), got {count}", node.line)
+
+    def _use_function(self, func_id: int, name: str, returns: str):
+        """Record an imported function for the conversation's import table"""
+        self.used_functions[func_id] = (name, returns)
+
     def _gen_call(self, node: FunctionCall, want_value: bool):
         if node.name in BUILTINS:
-            self._gen_builtin_call(node, BUILTINS[node.name], want_value)
+            self._gen_builtin_call(node, self._select_builtin(node), want_value)
             return
 
         info = self.functions.get(node.name)
@@ -1538,13 +1635,12 @@ class CodeGenerator:
 
     def _gen_builtin_call(self, node: FunctionCall, builtin: Builtin, want_value: bool):
         count = len(node.arguments)
-        if not builtin.min_args <= count <= builtin.max_args:
-            expected = str(builtin.min_args) if builtin.min_args == builtin.max_args \
-                else f"{builtin.min_args} to {builtin.max_args}"
-            raise UWScriptError(f"Function '{node.name}' expects {expected} argument(s), got {count}", node.line)
         if builtin.order == 'console' and self.target != 'console':
             raise UWScriptError(f"'{node.name}' is a fantasy console function and does not exist in Ultima "
                                 f"Underworld (compile with --target console)", node.line)
+        if want_value and builtin.returns == 'void':
+            raise UWScriptError(f"'{node.name}' does not return a value", node.line)
+        self._use_function(builtin.id, builtin.import_name, builtin.returns)
 
         # Every argument is passed by reference (a pointer to its value)
         block = self._alloc_temps(count)
@@ -1739,6 +1835,7 @@ class CodeGenerator:
         self._emit("STO")
         self._emit_addr(temp_loc)
         self._emit("PUSHI", 1)
+        self._use_function(FREEZE_STRING, 'freeze_string', 'int')
         self._emit("CALLI", FREEZE_STRING)
         self._emit("POP")
         self._emit("POP")
@@ -1810,9 +1907,9 @@ class CodeGenerator:
         for slot in self.snapshot_slots:
             slot.addr = snapshot_base + slot.index
         self.memory_end = snapshot_base + len(self.snapshot_slots)
-        if self.memory_end > STACK_BASE:
+        if self.memory_end > MAX_MEMORY_SLOTS:
             raise UWScriptError(f"The program needs {self.memory_end - GLOBALS_BASE} global memory slots, "
-                                f"but only {STACK_BASE - GLOBALS_BASE} are available")
+                                f"but only {MAX_MEMORY_SLOTS - GLOBALS_BASE} are available")
 
     @staticmethod
     def _escape(text: str) -> str:
@@ -1826,6 +1923,8 @@ class CodeGenerator:
             kind = sym.vtype
         if sym.kind == 'global':
             return f"{GLOBALS_BASE + sym.offset} ({kind})"
+        if sym.kind == 'game':
+            return f"{sym.offset} (game global, {kind})"
         return f"{sym.offset} ({sym.kind}, {kind})"
 
     def _format_code(self) -> str:
@@ -1834,12 +1933,22 @@ class CodeGenerator:
             lines.append(f"; Source: {self.source_name}")
         lines += [
             f"; String Block: {self.string_block}",
+            f"; Memory Slots: {self.memory_end}",
             f"; Target: {'Ultima Underworld' if self.target == 'uw' else 'fantasy console'}",
-            f"; Globals: {self.global_size} variable slot(s), "
-            f"{self.memory_end - GLOBALS_BASE - self.global_size} hidden slot(s), starting at {GLOBALS_BASE}",
+            f"; Globals: game globals at 0-{len(GAME_GLOBALS) - 1}; {self.global_size} variable slot(s) and "
+            f"{self.memory_end - GLOBALS_BASE - self.global_size} hidden slot(s) from {GLOBALS_BASE}",
             ";",
-            "; Strings:",
+            "; Imported Functions/Variables:",
         ]
+        index = 0
+        for func_id in sorted(self.used_functions):
+            name, returns = self.used_functions[func_id]
+            lines.append(f"; Import {index}: Function {name}, ID: {func_id}, Returns: {returns}")
+            index += 1
+        for name in sorted(self.used_game_globals, key=GAME_GLOBAL_ADDRESSES.get):
+            lines.append(f"; Import {index}: Variable {name}, Addr: 0x{GAME_GLOBAL_ADDRESSES[name]:04X}")
+            index += 1
+        lines += [";", "; Strings:"]
         for i, text in enumerate(self.string_literals):
             note = "  (reserved: menu terminator)" if i == 0 else ""
             lines.append(f'; {i}: "{self._escape(text)}"{note}')
