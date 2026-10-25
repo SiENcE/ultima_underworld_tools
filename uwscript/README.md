@@ -49,7 +49,7 @@ python uwscript_compiler.py program.uws [-o program.asm] [-s program_strings.txt
 | `-v`, `--verbose` | | print the files written |
 | `--debug` | | parser debug output and a traceback on errors |
 
-Errors are printed as `program.uws: error: Line 12, column 5: ...` and the exit code is 1.
+Errors are printed as `program.uws: error: Line 12, column 5: ...` and the exit code is 1. Warnings (`program.uws: warning: ...`) don't stop the compilation.
 
 ### VM options
 
@@ -57,7 +57,7 @@ Errors are printed as `program.uws: error: Line 12, column 5: ...` and the exit 
 python uwscript_vm.py program.asm|program.uws [--strings FILE] [--quest ID=VALUE ...] [--debug]
 ```
 
-Menus and `ask` read from stdin, so you can script a run with `printf '1\n2\n' | python uwscript_vm.py ...`. `get_quest` returns 0 unless the program set the flag or you preset it with `--quest 5=1`. On runtime errors (stack overflow, bad memory access) the VM stops with a message and exit code 1.
+Menus and `ask` read from stdin, so you can script a run with `printf '1\n2\n' | python uwscript_vm.py ...`. `get_quest` returns 0 unless the program set the flag or you preset it with `--quest 5=1`. On runtime errors (stack overflow, unknown instructions) the VM stops with a message and exit code 1. Numbers are signed 16-bit, as in the game.
 
 ## Folder contents
 
@@ -94,7 +94,7 @@ The full reference is [docs/uwscript-language-spec.md](docs/uwscript-language-sp
 ### Things to know
 
 - Variables are scoped per function, not per block. Everything declared in the main program is a global.
-- Joined strings become text-substitution templates. A stored string (`let msg = "HP: " + hp`) keeps the values it had when it was built.
+- Joined strings become text-substitution templates. A stored string (`let msg = "HP: " + hp`) keeps the values it had when it was built. Building a string from itself (`s += "x"`) works in the UWScript VM, and the compiler warns that the game itself cannot do it.
 - Array sizes are fixed, constant indexes are checked when compiling, and computed indexes are not checked at runtime.
 - `and`/`or` evaluate both sides.
 

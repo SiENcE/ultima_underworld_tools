@@ -516,7 +516,12 @@ class Parser:
 
     def _parse_menu_statement(self) -> MenuStatement:
         menu_token = self._expect(TokenType.KEYWORD, 'menu')
-        variable = self._consume().value if self._match(TokenType.IDENTIFIER) else None
+        # The result variable is optional: an identifier is the variable only
+        # when the option list follows it (menu choice "A", "B" / menu choice [...]),
+        # otherwise it is the first option (menu a, b)
+        variable = None
+        if self._match(TokenType.IDENTIFIER) and self._starts_option_list(self._peek(1)):
+            variable = self._consume().value
         items = []
 
         if self._match(TokenType.PUNCTUATION, '['):
@@ -544,6 +549,18 @@ class Parser:
         node.variable = variable
         node.items = items
         return node
+
+    @staticmethod
+    def _starts_option_list(token: Token) -> bool:
+        if token.type in (TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER):
+            return True
+        if token.type == TokenType.PUNCTUATION:
+            return token.value == '['
+        if token.type == TokenType.KEYWORD:
+            return token.value in ('true', 'false', 'not')
+        if token.type == TokenType.OPERATOR:
+            return token.value in ('-', '!')
+        return False
 
     def _parse_filtermenu_statement(self) -> FilterMenuStatement:
         menu_token = self._expect(TokenType.KEYWORD, 'filtermenu')
@@ -775,6 +792,8 @@ BUILTINS: Dict[str, Builtin] = {
 BABL_MENU = 0
 BABL_FMENU = 1
 BABL_ASK = 3
+# UWScript VM only: expands a string template now and returns the id of the resulting text
+FREEZE_STRING = 600
 
 ARITHMETIC_OPS = {'+': 'OPADD', '-': 'OPSUB', '*': 'OPMUL', '/': 'OPDIV', '%': 'OPMOD'}
 COMPARISON_OPS = {'==': 'TSTEQ', '!=': 'TSTNE', '<': 'TSTLT', '>': 'TSTGT', '<=': 'TSTLE', '>=': 'TSTGE'}
@@ -900,6 +919,7 @@ class CodeGenerator:
         self.main_temps = TempPool()
         self.main_temp_slots: Dict[int, HiddenSlot] = {}
         self.snapshot_slots: List[HiddenSlot] = []
+        self.warnings: List[str] = []
 
     # -- entry point --------------------------------------------------------
 
@@ -976,10 +996,14 @@ class CodeGenerator:
         for stmt in self._walk_statements(statements):
             if isinstance(stmt, VariableDeclaration):
                 self._declare(stmt.name, stmt.children[0], stmt)
-            elif isinstance(stmt, AskStatement) and stmt.variable:
-                self._declare(stmt.variable, None, stmt, vtype='string')
-            elif isinstance(stmt, (MenuStatement, FilterMenuStatement)) and stmt.variable:
-                self._declare(stmt.variable, None, stmt, vtype='int')
+            elif isinstance(stmt, (AskStatement, MenuStatement, FilterMenuStatement)) and stmt.variable:
+                vtype = 'string' if isinstance(stmt, AskStatement) else 'int'
+                # Like an assignment, these write an existing global from inside a function
+                if self.scope and stmt.variable not in self.scope.symbols and stmt.variable in self.globals:
+                    if vtype == 'string':
+                        self.globals[stmt.variable].vtype = 'string'
+                    continue
+                self._declare(stmt.variable, None, stmt, vtype=vtype)
 
     def _declare(self, name: str, init, stmt, vtype: Optional[str] = None):
         if name in BUILTINS or name in self.functions:
@@ -1223,7 +1247,7 @@ class CodeGenerator:
                 self._gen_array_init(sym, init)
             else:
                 self._emit_addr(self._loc(sym))
-                self._gen_expr(init)
+                self._gen_expr(init, freeze=self._uses_target(init, node.name, element=False))
                 self._emit("STO")
 
         elif isinstance(node, Assignment):
@@ -1286,10 +1310,10 @@ class CodeGenerator:
             if node.label not in labels:
                 where = f"function '{self.scope.name}'" if self.scope else "the main program"
                 raise UWScriptError(f"Label '{node.label}' is not defined in {where}", node.line)
-            self._emit("JMP", f"lbl_{node.label}")
+            self._emit("JMP", self._user_label(node.label))
 
         elif isinstance(node, LabelStatement):
-            self._emit_label(f"lbl_{node.name}")
+            self._emit_label(self._user_label(node.name))
 
         elif isinstance(node, ExitStatement):
             self._emit("EXIT_OP")
@@ -1299,6 +1323,10 @@ class CodeGenerator:
 
         else:
             raise UWScriptError(f"Unsupported statement {type(node).__name__}", node.line)
+
+    def _user_label(self, name: str) -> str:
+        # '.' cannot appear in identifiers, so labels of different scopes never clash
+        return f"{self.scope.label}.{name}" if self.scope else f"lbl_{name}"
 
     def _store_result(self, name: str, node):
         """Store the result register in a variable."""
@@ -1336,12 +1364,9 @@ class CodeGenerator:
             loc = self._loc(sym)
             self._emit_addr(loc)
             if op == '=':
-                self._gen_expr(value)
+                self._gen_expr(value, freeze=self._uses_target(value, target.name, element=False))
             elif op == '+=' and (sym.vtype == 'string' or self._expr_type(value) == 'string'):
-                concat = BinaryOperation(Token(TokenType.OPERATOR, '+', node.token.line, node.token.column))
-                concat.left = target
-                concat.right = value
-                self._gen_expr(concat)
+                self._gen_expr(self._append_node(node, target, value), freeze=True)
             else:
                 self._emit_addr(loc)
                 self._emit("FETCHM")
@@ -1351,16 +1376,27 @@ class CodeGenerator:
             return
 
         # Array element
+        base = target
+        while isinstance(base, ArrayAccess):
+            base = base.array
+        base_name = base.name if isinstance(base, Identifier) else None
+
         if op == '=':
-            self._gen_element_address(target)
-            self._gen_expr(value)
+            self._gen_target_address(target)
+            self._gen_expr(value, freeze=self._uses_target(value, base_name, element=True))
+            self._emit("STO")
+            return
+
+        if op == '+=' and (self._expr_type(target) == 'string' or self._expr_type(value) == 'string'):
+            self._gen_target_address(target)
+            self._gen_expr(self._append_node(node, target, value), freeze=True)
             self._emit("STO")
             return
 
         temp = self._alloc_temps(1)
         temp_loc = self._temp_loc(temp)
         self._emit_addr(temp_loc)
-        self._gen_element_address(target)
+        self._gen_target_address(target)
         self._emit("STO")
         self._emit_addr(temp_loc)
         self._emit("FETCHM")
@@ -1371,6 +1407,31 @@ class CodeGenerator:
         self._emit(COMPOUND_OPS[op])
         self._emit("STO")
         self._free_temps(temp)
+
+    def _gen_target_address(self, target: ArrayAccess):
+        if not self._gen_element_address(target):
+            raise UWScriptError("Cannot assign to a whole row of an array; index all dimensions", target.line)
+
+    @staticmethod
+    def _append_node(node, target, value) -> BinaryOperation:
+        concat = BinaryOperation(Token(TokenType.OPERATOR, '+', node.token.line, node.token.column))
+        concat.left = target
+        concat.right = value
+        return concat
+
+    def _uses_target(self, value, name, element: bool) -> bool:
+        """True if a string join assigned to variable `name` (or one of its
+        elements) reads that same target (s = s + "x")."""
+        if name is None or not (isinstance(value, BinaryOperation) and self._is_concat(value)):
+            return False
+        for operand in self._concat_parts(value.left) + self._concat_parts(value.right):
+            base = operand
+            while isinstance(base, ArrayAccess):
+                base = base.array
+            if isinstance(base, Identifier) and base.name == name \
+                    and isinstance(operand, ArrayAccess) == element:
+                return True
+        return False
 
     def _gen_menu(self, node: MenuStatement):
         count = len(node.items)
@@ -1509,7 +1570,7 @@ class CodeGenerator:
 
     # -- expressions --------------------------------------------------------
 
-    def _gen_expr(self, node, immediate: bool = False):
+    def _gen_expr(self, node, immediate: bool = False, freeze: bool = False):
         """Push the value of an expression.
 
         `immediate` is set when the value is displayed right away (say and
@@ -1542,7 +1603,7 @@ class CodeGenerator:
             self._emit("OPNEG" if node.op == '-' else "OPNOT")
 
         elif isinstance(node, BinaryOperation):
-            self._gen_binary(node, immediate)
+            self._gen_binary(node, immediate, freeze)
 
         elif isinstance(node, ArrayLiteral):
             raise UWScriptError("Array literals can only be used with 'let'", node.line)
@@ -1550,11 +1611,11 @@ class CodeGenerator:
         else:
             raise UWScriptError(f"Unsupported expression {type(node).__name__}", node.line)
 
-    def _gen_binary(self, node: BinaryOperation, immediate: bool):
+    def _gen_binary(self, node: BinaryOperation, immediate: bool, freeze: bool = False):
         op = node.token.value
 
         if op == '+' and self._is_concat(node):
-            self._gen_concat(node, immediate)
+            self._gen_concat(node, immediate, freeze)
             return
 
         if op in ('and', 'or'):
@@ -1573,6 +1634,10 @@ class CodeGenerator:
                 self._emit("OPNOT")
             return
 
+        for side in (node.left, node.right):
+            if self._expr_type(side) == 'string':
+                raise UWScriptError(f"Operator '{op}' cannot be used with a string "
+                                    f"(use parentheses for arithmetic inside text: \"n=\" + (x - 1))", node.line)
         self._gen_expr(node.left)
         self._gen_expr(node.right)
         if op in ARITHMETIC_OPS:
@@ -1598,7 +1663,7 @@ class CodeGenerator:
             self._emit("PUSHI", 0)
             self._emit("TSTNE")
 
-    def _gen_concat(self, node: BinaryOperation, immediate: bool):
+    def _gen_concat(self, node: BinaryOperation, immediate: bool, freeze: bool = False):
         """Build a string template with text substitutions and push its id.
 
         Values that are not plain variables are evaluated into hidden global
@@ -1629,8 +1694,31 @@ class CodeGenerator:
             self._gen_expr(operand)
             self._emit("STO")
             parts.append(self._subst_ref(slot, vtype))
+            if self.scope and isinstance(operand, FunctionCall) and operand.name == self.scope.name \
+                    and vtype == 'string':
+                freeze = True   # a recursive call returns this same template
 
-        self._emit("PUSHI", self._intern(parts))
+        string_id = self._intern(parts)
+        if not freeze or immediate:
+            self._emit("PUSHI", string_id)
+            return
+
+        # The template would refer to itself the next time this line runs, so
+        # expand it into a new string now. Only the UWScript VM can do that.
+        self.warnings.append(f"Line {node.line}: a string built from itself (like s += \"x\") uses a "
+                             f"function that only the UWScript VM and the fantasy console provide")
+        temp = self._alloc_temps(1)
+        temp_loc = self._temp_loc(temp)
+        self._emit_addr(temp_loc)
+        self._emit("PUSHI", string_id)
+        self._emit("STO")
+        self._emit_addr(temp_loc)
+        self._emit("PUSHI", 1)
+        self._emit("CALLI", FREEZE_STRING)
+        self._emit("POP")
+        self._emit("POP")
+        self._free_temps(temp)
+        self._emit("PUSH_REG")
 
     def _gen_element_address(self, node: ArrayAccess) -> bool:
         """Push the address of an array element.
@@ -1787,6 +1875,7 @@ def compile_uwscript(source: str, block_id: int = 1, debug: bool = False,
     return {
         "assembly": assembly,
         "strings": generate_strings_file(generator.string_literals, block_id),
+        "warnings": list(dict.fromkeys(generator.warnings)),
     }
 
 
@@ -1828,6 +1917,9 @@ def main(argv=None) -> int:
         if args.debug:
             raise
         return 1
+
+    for warning in result["warnings"]:
+        print(f"{args.input}: warning: {warning}", file=sys.stderr)
 
     if output == '-':
         sys.stdout.write(result["assembly"])

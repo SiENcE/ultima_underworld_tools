@@ -109,7 +109,9 @@ class UltimaUnderworldVM:
             47: self.func_x_obj_stuff,
             48: self.func_find_inv,
             49: self.func_find_barter,
-            50: self.func_find_barter_total
+            50: self.func_find_barter_total,
+            # UWScript VM extension (not in the game): see func_freeze_string
+            600: self.func_freeze_string,
         }
     
     def log(self, *args, **kwargs):
@@ -376,15 +378,18 @@ class UltimaUnderworldVM:
             if match:
                 self.string_literals.append(match.group(1))
 
-        # Extract metadata from the header comments
-        for line in lines[:20]:
+        # Extract metadata from the header comments (before the first instruction)
+        for line in lines:
             line = line.strip()
-            if "; Slot:" in line:
-                slot_str = line.split('Slot:')[1].strip()
-                self.slot_idx = int(slot_str, 16)
+            if line and not line.startswith(';'):
+                break
+            slot = re.match(r'^;\s*Slot:\s*(0x[0-9A-Fa-f]+|[0-9A-Fa-f]+)\s*$', line)
+            block = re.match(r'^;\s*String Block:\s*(\d+)\s*$', line)
+            if slot:
+                self.slot_idx = int(slot.group(1), 16)
                 self.log(f"Found slot ID: 0x{self.slot_idx:04X}")
-            elif "; String Block:" in line:
-                self.string_block = int(line.split('String Block:')[1].strip())
+            elif block:
+                self.string_block = int(block.group(1))
                 self.log(f"Found string block: {self.string_block}")
                 self.set_string_block(self.string_block)
 
@@ -589,22 +594,33 @@ class UltimaUnderworldVM:
         self.log(f"Memory: game globals=0-31, base_ptr={self.base_pointer}, stack_ptr={self.stack_pointer}")
 
     
+    @staticmethod
+    def word(value):
+        """Wrap a value to a signed 16-bit word, like the game's VM"""
+        return ((value + 0x8000) & 0xFFFF) - 0x8000
+
+    @staticmethod
+    def divide(a, b):
+        """Integer division and remainder that truncate toward zero (as in C)"""
+        if b == 0:
+            return 0, 0
+        quotient = abs(a) // abs(b)
+        if (a < 0) != (b < 0):
+            quotient = -quotient
+        return quotient, a - b * quotient
+
     @property
     def stack(self):
         """The values currently on the stack (bottom first), for debugging"""
         return self.memory[self.stack_base:self.stack_pointer]
 
     def get_mem(self, address):
-        """Get a value from memory"""
-        if not 0 <= address < len(self.memory):
-            raise VMError(f"Memory read outside of the address space: {address}")
-        return self.memory[address]
+        """Get a value from memory (addresses are 16-bit, so -1 is 65535)"""
+        return self.memory[address & 0xFFFF]
     
     def set_mem(self, address, value):
-        """Set a value in memory"""
-        if not 0 <= address < len(self.memory):
-            raise VMError(f"Memory write outside of the address space: {address}")
-        self.memory[address] = value
+        """Set a value in memory (addresses are 16-bit, so -1 is 65535)"""
+        self.memory[address & 0xFFFF] = value
     
     def push(self, value):
         """Push a value onto the stack"""
@@ -672,7 +688,7 @@ class UltimaUnderworldVM:
         """Add top two values on stack"""
         b = self.pop()
         a = self.pop()
-        self.push(a + b)
+        self.push(self.word(a + b))
         self.log(f"OPADD: {a} + {b} = {a + b}")
         self.pc += 1
         
@@ -680,7 +696,7 @@ class UltimaUnderworldVM:
         """Multiply top two values on stack"""
         b = self.pop()
         a = self.pop()
-        self.push(a * b)
+        self.push(self.word(a * b))
         self.log(f"OPMUL: {a} * {b} = {a * b}")
         self.pc += 1
         
@@ -688,32 +704,26 @@ class UltimaUnderworldVM:
         """Subtract top value from second value on stack"""
         b = self.pop()
         a = self.pop()
-        self.push(a - b)
+        self.push(self.word(a - b))
         self.log(f"OPSUB: {a} - {b} = {a - b}")
         self.pc += 1
         
     def op_div(self):
-        """Divide second value by top value on stack"""
+        """Divide second value by top value on stack (truncating; x / 0 gives 0)"""
         b = self.pop()
         a = self.pop()
-        if b == 0:  # Avoid division by zero
-            self.push(0)
-            self.log(f"OPDIV: {a} / {b} = 0 (division by zero)")
-        else:
-            self.push(a // b)  # Integer division
-            self.log(f"OPDIV: {a} / {b} = {a // b}")
+        result = self.word(self.divide(a, b)[0])
+        self.push(result)
+        self.log(f"OPDIV: {a} / {b} = {result}")
         self.pc += 1
         
     def op_mod(self):
-        """Modulo operation on top two stack values"""
+        """Remainder of second value divided by top value (sign of the dividend; x % 0 gives 0)"""
         b = self.pop()
         a = self.pop()
-        if b == 0:  # Avoid division by zero
-            self.push(0)
-            self.log(f"OPMOD: {a} % {b} = 0 (division by zero)")
-        else:
-            self.push(a % b)
-            self.log(f"OPMOD: {a} % {b} = {a % b}")
+        result = self.word(self.divide(a, b)[1])
+        self.push(result)
+        self.log(f"OPMOD: {a} % {b} = {result}")
         self.pc += 1
         
     def op_or(self):
@@ -868,7 +878,7 @@ class UltimaUnderworldVM:
         
     def op_pushi(self):
         """Push immediate value onto stack"""
-        value = self.code[self.pc + 1]
+        value = self.word(self.code[self.pc + 1])
         self.log(f"PUSHI: Pushing immediate value {value}")
         self.push(value)
         self.pc += 2
@@ -998,7 +1008,7 @@ class UltimaUnderworldVM:
         """Negate top value on stack"""
         value = self.pop()
         self.log(f"OPNEG: Negating {value} to {-value}")
-        self.push(-value)
+        self.push(self.word(-value))
         self.pc += 1
     
     def finish_conversation(self):
@@ -1365,6 +1375,19 @@ class UltimaUnderworldVM:
         
         print(f"SET_LIKES_DISLIKES: Setting likes at {ptr1}, dislikes at {ptr2}")
     
+    def func_freeze_string(self):
+        """UWScript extension: expand a string template now and store the text as a new string.
+
+        The compiler uses it for strings built from themselves (s += "x" in a
+        loop), whose template would otherwise refer to itself.
+        """
+        string_id = self.arg_values()[0]
+        text = self._string_text(string_id) or ""
+        if self.current_string_block is None:
+            self.current_string_block = ['']
+        self.current_string_block.append(text)
+        self.result_register = len(self.current_string_block) - 1
+
     def func_gronk_door(self):
         """Open/close door or portcullis: gronk_door(x, y, flag)"""
         x, y, flag = self.arg_values()[:3]

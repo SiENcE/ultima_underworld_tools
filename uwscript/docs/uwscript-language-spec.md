@@ -47,7 +47,7 @@ Every value is a 16-bit word, like in the game's conversation VM.
 
 | Type | Examples | Notes |
 |------|----------|-------|
-| Integer | `42`, `0`, `-1` | Literals range from 0 to 65535; use `-` for negative values. Division truncates. |
+| Integer | `42`, `0`, `-1` | Signed 16-bit (−32768 to 32767). Results wrap around, so `300 * 300` is 24464 and the literal `65535` equals `-1`. Literals are written 0–65535; use `-` for negative values. Division truncates toward zero. |
 | Boolean | `true`, `false` | Stored as 1 and 0. Any non-zero value counts as true. |
 | String | `"Hello"` | A string is a *string id* into the conversation's string block (see [Strings](#5-strings)). |
 | Array | `[1, 2, 3]` | A fixed block of words; see [Arrays](#6-arrays). |
@@ -65,6 +65,7 @@ gold += 20                  // compound assignment: += -= *= /= %=
 - A variable must be declared with `let` before it can be assigned. Declaring the same name again in the same scope reuses the variable.
 - **Scope is per function, not per block.** Variables declared in the main program (also inside its `if`/`while` blocks) are *globals*. Variables declared inside a function are *locals* of that function, as are its parameters.
 - Functions can read and assign globals. A local or parameter with the same name hides the global.
+- Inside a function, `ask`, `menu` and `filtermenu` store into a global of that name if one exists (like an assignment); otherwise they declare a local.
 - Globals keep their value for the whole conversation. Locals exist only while the function runs; every call, including recursive calls, gets fresh ones.
 - Names of functions and built-in functions cannot be used as variable names.
 
@@ -85,7 +86,8 @@ From lowest to highest precedence:
 
 - `and`, `or` and `not` treat every non-zero value as true, so `1 and 2` is true. Both sides are always evaluated (no short-circuit).
 - `not` binds tighter than comparisons: write `not (a == b)` rather than `not a == b`.
-- Division and remainder by zero give 0 in the VM.
+- Division truncates toward zero, and the remainder has the sign of the dividend (`-7 / 2` is `-3`, `-7 % 2` is `-1`). Division and remainder by zero give 0 in the VM.
+- `-`, `*`, `/`, `%` and `<`/`>`/`<=`/`>=` cannot be used on strings. Inside text, put arithmetic in parentheses: `"n=" + (x - 1)`.
 
 ## 5. Strings
 
@@ -122,7 +124,7 @@ The game cannot build strings at runtime, so the compiler creates a *string temp
   ```
 
 - Each `+` expression in the source has one snapshot buffer. If the same line builds a string again (in a loop or a second call of the same function), strings stored from earlier runs show the newest values.
-- `s += "more"` appends to a string variable.
+- `s += "more"` appends to a string variable (or string array element), also in loops. A string built from itself (`s += ...`, `s = s + ...`, or a recursive `return "<" + f(n - 1) + ">"`) is expanded into new text when it is built. The compiler does this with a function that only the UWScript VM and the fantasy console have, and prints a warning, because the original game cannot create strings at runtime.
 - Joined strings may contain other joined strings. The VM expands substitutions up to 8 levels deep; the original game may expand only one level.
 - Text that contains `@` followed by `GI`, `GS`, `SI` or `SS` and a number is read as a substitution code.
 
@@ -170,7 +172,7 @@ say "Center: " + board[1][1]
   double_all(numbers, 5)
   ```
 
-- Only declared arrays support several indexes (`board[r][c]`). A parameter holding an array address takes one index. `board[r]` alone is the address of row `r`.
+- Only declared arrays support several indexes (`board[r][c]`). A parameter holding an array address takes one index. `board[r]` alone is the address of row `r`; it can be read or passed to a function, but not assigned.
 
 ## 7. Control flow
 
@@ -243,7 +245,7 @@ filtermenu pick [                        // option text, condition pairs
 
 - `menu` and `filtermenu` store the chosen option's position (starting at 1) in the variable, which is declared automatically. For `filtermenu`, the position counts *all* options, shown or hidden, so the code above can test `pick == 3` for "Leave" whatever is hidden.
 - Options can be joined strings, for example `"Pay " + price + " gold"`.
-- The variable after `ask`/`menu`/`filtermenu` is optional.
+- The variable after `ask`/`menu`/`filtermenu` is optional. In the short `menu` form, an identifier directly followed by `,` or the end of the line is the first option, not the variable: `menu a, b` shows the strings in `a` and `b`, while `menu choice a, b` also stores the result.
 
 ## 10. Built-in functions
 
@@ -291,7 +293,7 @@ The compiler stops at the first error and reports its line (and usually its colu
 shop.uws: error: Line 12, column 1: Missing 'endif' for 'if' started at line 4
 ```
 
-It reports, among others: unknown characters, unterminated strings, numbers above 65535, missing or stray block keywords, statements that are neither an assignment nor a call (`x`, `a == 1`), undefined variables, functions and labels, wrong argument counts, `return` outside a function, nested function definitions, constant array indexes out of bounds, non-rectangular nested arrays, and programs that need more memory than the VM has (4096 words of globals).
+It reports, among others: unknown characters, unterminated strings, numbers above 65535, missing or stray block keywords, statements that are neither an assignment nor a call (`x`, `a == 1`), undefined variables, functions and labels, wrong argument counts, arithmetic on strings, assigning a whole row of an array, `return` outside a function, nested function definitions, constant array indexes out of bounds, non-rectangular nested arrays, and programs that need more memory than the VM has (4096 words of globals).
 
 ## 12. Grammar
 

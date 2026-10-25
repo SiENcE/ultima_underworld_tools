@@ -483,6 +483,113 @@ class TestErrors(unittest.TestCase):
         self.assertCompileError('label a\nfunction f()\n    goto a\nendfunction', "not defined in function")
 
 
+class TestReviewFindings(unittest.TestCase):
+    """Regressions found in review of the rewritten compiler."""
+
+    def test_string_built_from_itself(self):
+        self.assertEqual(says('''
+let s = ""
+let i = 0
+while i < 3
+    s += "x"
+    i += 1
+endwhile
+say s
+let t = "a"
+t = t + "b"
+t = t + "c"
+say t
+function wrap(n)
+    if n == 0
+        return "."
+    endif
+    return "<" + wrap(n - 1) + ">"
+endfunction
+say wrap(3)
+'''), ["xxx", "abc", "<<<.>>>"])
+        warnings = compile_uwscript('let s = ""\ns += "x"')['warnings']
+        self.assertEqual(len(warnings), 1)
+
+    def test_plain_stored_strings_stay_engine_compatible(self):
+        result = compile_uwscript('let hp = 3\nlet msg = "HP: " + hp\nsay msg')
+        self.assertEqual(result['warnings'], [])
+        self.assertNotIn("CALLI 600", result['assembly'])
+
+    def test_append_to_string_array_element(self):
+        self.assertEqual(says('let a = ["x"]\na[0] += "y"\na[0] += "z"\nsay a[0]'), ["xyz"])
+
+    def test_assigning_a_row_is_an_error(self):
+        for source in ('let m = [[1,2],[3,4]]\nm[1] = 9', 'let m = [[1,2],[3,4]]\nm[1] += 5'):
+            with self.assertRaisesRegex(UWScriptError, "whole row"):
+                compile_uwscript(source)
+
+    def test_same_label_in_different_scopes(self):
+        self.assertEqual(says('''
+let n = 0
+label top
+n += 1
+function f()
+    let i = 0
+    label top
+    i += 1
+    if i < 3
+        goto top
+    endif
+    return i
+endfunction
+function g()
+    label top
+    return 7
+endfunction
+if n < 2
+    goto top
+endif
+say "" + n + " " + f() + " " + g()
+'''), ["2 3 7"])
+
+    def test_short_menu_with_variable_options(self):
+        said, text, _ = run('''
+let a = "Yes"
+let b = "No"
+menu a, b
+menu c a, b
+say "c=" + c
+''', inputs=['1', '2'])
+        self.assertIn("1. Yes", text)
+        self.assertEqual(said, ["c=2"])
+
+    def test_16_bit_arithmetic(self):
+        self.assertEqual(says('''
+let a = -7
+say "" + (a / 2) + " " + (a % 2) + " " + (7 / -2) + " " + 300 * 300
+let b = 65535
+if b == -1
+    say "wraps"
+endif
+'''), ["-3 -1 -3 24464", "wraps"])
+
+    def test_header_text_inside_strings(self):
+        self.assertEqual(says('say "a; String Block: 2"\nsay "b; Slot: 12"'),
+                         ["a; String Block: 2", "b; Slot: 12"])
+
+    def test_arithmetic_on_strings_is_an_error(self):
+        with self.assertRaisesRegex(UWScriptError, "cannot be used with a string"):
+            compile_uwscript('let x = 5\nsay "n=" + x - 1')
+        self.assertEqual(says('let x = 5\nsay "n=" + (x - 1)'), ["n=4"])
+
+    def test_menu_and_ask_in_functions_write_globals(self):
+        self.assertEqual(says('''
+let answer = 0
+let name = "?"
+function pick()
+    menu answer ["a", "b"]
+    ask name
+endfunction
+pick()
+say "" + answer + " " + name
+''', inputs=['2', 'Bob']), ["2 Bob"])
+
+
 class TestSamplesAndCommandLine(unittest.TestCase):
 
     def test_all_samples_run(self):

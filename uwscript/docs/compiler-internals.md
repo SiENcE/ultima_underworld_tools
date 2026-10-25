@@ -103,6 +103,7 @@ For `"text" + x + ...`, the compiler adds a new string such as `You have @GI97 g
 - In `say` and menu options, a plain variable is referenced in place: `@GI`/`@GS` for globals, `@SI`/`@SS` for locals and parameters (a parameter at `PUSHI_EFF k` becomes `@S?(k-1)`).
 - Anything else (expressions, array elements, call results, and all values when the string is stored) is evaluated into its own hidden global *snapshot slot* and referenced with `@GI`/`@GS`. Stored strings therefore keep their values and stay valid after the function that built them returns.
 - `@?S` parts that point at another template are expanded again by the VM, up to 8 levels.
+- A join that reads its own target (`s += "x"`, `s = s + "x"`, `a[i] += "x"`) or a recursive call of the current function would make the template refer to itself the next time the line runs. For those, the compiler calls imported function **600** (`freeze_string`, a UWScript VM extension) on the template. The VM expands the template immediately and returns the id of a new string holding the text. The compiler warns when it does this.
 
 String id 0 is reserved and empty, because 0 terminates menu option lists. Real strings start at id 1.
 
@@ -175,10 +176,11 @@ RET
 | Label | Used for |
 |-------|----------|
 | `fn_<name>` | function entry points |
-| `lbl_<name>` | user labels (`label <name>`) |
+| `lbl_<name>` | user labels in the main program |
+| `fn_<function>.<name>` | user labels inside a function (labels are per scope) |
 | `L<n>_<kind>` | generated jump targets (`if`, `while`) |
 
-The prefixes keep user labels, functions and generated labels from clashing.
+The prefixes, and the `.` that identifiers cannot contain, keep labels of different scopes, functions and generated labels from clashing.
 
 ## The VM (`uwscript_vm.py`)
 
@@ -187,7 +189,8 @@ The VM runs the assembly in the terminal and is the base of the fantasy console.
 - `CALLI` restores the stack pointer after the handler runs and pushes nothing, matching the engine's stack effect. The handlers read their arguments with `pop_args()`/`arg_values()`, which return them in engine order (arg1 first).
 - `get_quest` returns 0 for flags that are not set (preset them with `--quest ID=VALUE`). `set_quest` stores the value.
 - Menus and `ask` read from stdin. When the input ends, the conversation ends cleanly.
-- It stops with an error message and exit code 1 on unknown instructions or labels, stack overflow/underflow and memory accesses outside 0–65535.
+- Arithmetic is signed 16-bit: `OPADD`, `OPSUB`, `OPMUL`, `OPDIV`, `OPMOD`, `OPNEG` and `PUSHI` wrap their results, division truncates toward zero, and memory addresses wrap at 65536.
+- It stops with an error message and exit code 1 on unknown instructions or labels and on stack overflow/underflow.
 - `python uwscript_vm.py program.uws` compiles in memory and runs the program, and `--debug` traces every instruction.
 
 ## Using the output in the game
@@ -196,3 +199,4 @@ The opcodes, the imported-function calling convention and the substitution codes
 
 - Globals at absolute address 96 and up. The game reserves a fixed number of memory slots per conversation, given in the conversation header; `tools/conversations/uw_cnv_compiler.py` reads it from a `; Memory Slots:` header comment, which the UWScript compiler does not write.
 - Nested string templates (a joined string inside another joined string).
+- Imported function 600 (`freeze_string`), which the compiler only emits for strings built from themselves and always reports with a warning.
