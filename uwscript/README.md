@@ -46,6 +46,7 @@ python uwscript_compiler.py program.uws [-o program.asm] [-s program_strings.txt
 | `-o`, `--output` | `<input>.asm` | assembly file; `-` writes it to stdout |
 | `-s`, `--strings` | `<output>_strings.txt` | string block file |
 | `-b`, `--block` | `1` | string block id |
+| `-t`, `--target` | `uw` | `uw`: only what Ultima Underworld supports; `console`: also the [fantasy console](../fantasy_console/README.md) functions |
 | `-v`, `--verbose` | | print the files written |
 | `--debug` | | parser debug output and a traceback on errors |
 
@@ -89,12 +90,12 @@ The full reference is [docs/uwscript-language-spec.md](docs/uwscript-language-sp
 | Strings | `"Hello " + name + ", you have " + gold + " gold"`; `==` on strings compares the text |
 | Dialogue | `say`, `ask name`, `menu choice [...]`, `filtermenu choice ["text", condition, ...]` |
 | Game functions | `random`, `get_quest`, `set_quest`, `compare`, `contains`, `string_length`, `gronk_door` |
-| Fantasy console | `clear_screen`, `draw_sprite`, `print`, `flip_display`, `is_key_pressed`, `play_tone`, ... |
+| Fantasy console (`--target console`) | `clear_screen`, `draw_sprite`, `print`, `fill_circle`, `get_pixel`, `flip_display`, `is_key_pressed`, `play_tone`, ... |
 
 ### Things to know
 
 - Variables are scoped per function, not per block. Everything declared in the main program is a global.
-- Joined strings become text-substitution templates. A stored string (`let msg = "HP: " + hp`) keeps the values it had when it was built. Building a string from itself (`s += "x"`) works in the UWScript VM, and the compiler warns that the game itself cannot do it.
+- Joined strings become text-substitution templates. A stored string (`let msg = "HP: " + hp`) keeps the values it had when it was built. The game cannot build strings at runtime, so the compiler refuses `s += "x"` on a line that can run again, unless you compile for the fantasy console.
 - Array sizes are fixed, constant indexes are checked when compiling, and computed indexes are not checked at runtime.
 - `and`/`or` evaluate both sides.
 

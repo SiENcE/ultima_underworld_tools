@@ -1,3 +1,2 @@
 # Fantasy console (fantasy_console.py, standalone_jumprun.py)
-pygame
-numpy  # optional: tone generation for sound opcodes
+pygame>=2.0

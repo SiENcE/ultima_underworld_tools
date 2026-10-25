@@ -124,7 +124,7 @@ The game cannot build strings at runtime, so the compiler creates a *string temp
   ```
 
 - Each `+` expression in the source has one snapshot buffer. If the same line builds a string again (in a loop or a second call of the same function), strings stored from earlier runs show the newest values.
-- `s += "more"` appends to a string variable (or string array element), also in loops. A string built from itself (`s += ...`, `s = s + ...`, or a recursive `return "<" + f(n - 1) + ">"`) is expanded into new text when it is built. The compiler does this with a function that only the UWScript VM and the fantasy console have, and prints a warning, because the original game cannot create strings at runtime.
+- `s += "more"` appends to a string variable (or string array element). The game cannot create strings at runtime, so a string built from itself (`s += ...`, `s = s + ...`, or a recursive `return "<" + f(n - 1) + ">"`) can only be built once. For conversations (the default `uw` target), the compiler refuses such a line if it can run again: in a loop, in a function, or in a program with labels. With `--target console`, the fantasy console expands the text when it is built, so it also works in loops.
 - Joined strings may contain other joined strings. The VM expands substitutions up to 8 levels deep; the original game may expand only one level.
 - Text that contains `@` followed by `GI`, `GS`, `SI` or `SS` and a number is read as a substitution code.
 
@@ -267,7 +267,7 @@ In the terminal VM, `get_quest` returns 0 until the program sets a flag. You can
 
 ### Fantasy console functions
 
-These work only on the [fantasy console](../../fantasy_console/README.md) (128×128 pixels, 16 colors).
+These exist only on the [fantasy console](../../fantasy_console/README.md) (128×128 pixels, 16 colors), so the compiler accepts them only with `--target console`.
 
 | Function | Description |
 |----------|-------------|
@@ -277,13 +277,16 @@ These work only on the [fantasy console](../../fantasy_console/README.md) (128×
 | `draw_rect(x, y, w, h, color)` / `fill_rect(...)` | outline / filled rectangle |
 | `draw_circle(x, y, radius, color)` | circle outline |
 | `draw_sprite(x, y, sprite)` | draw an array `[width, height, pixel, ...]`; color 0 is transparent |
-| `print(x, y, text, color)` | draw text |
+| `fill_circle(x, y, radius, color)` | filled circle |
+| `print(x, y, text, color)` | draw text with the built-in 3×5 font |
+| `get_pixel(x, y)` | color at a pixel, -1 outside the screen |
 | `flip_display()` | show the frame (and end the current frame) |
 | `play_tone(frequency, ms, channel)` | play a tone |
-| `is_key_pressed(key)` / `is_key_released(key)` | keys: 0 up, 1 down, 2 left, 3 right, 4 space, 5 return, 6 escape |
+| `is_key_pressed(key)` / `is_key_released(key)` | keys: 0 up/W, 1 down/S, 2 left/A, 3 right/D, 4 space, 5 return, 6 escape, 7 Z, 8 X |
 | `math_sin(deg)` / `math_cos(deg)` | sine/cosine × 100 |
 | `math_sqrt(n)` | integer square root |
 | `delay(ms)` | pause |
+| `get_frame()` | frames shown so far |
 
 ## 11. Compile errors
 
@@ -293,7 +296,11 @@ The compiler stops at the first error and reports its line (and usually its colu
 shop.uws: error: Line 12, column 1: Missing 'endif' for 'if' started at line 4
 ```
 
-It reports, among others: unknown characters, unterminated strings, numbers above 65535, missing or stray block keywords, statements that are neither an assignment nor a call (`x`, `a == 1`), undefined variables, functions and labels, wrong argument counts, arithmetic on strings, assigning a whole row of an array, `return` outside a function, nested function definitions, constant array indexes out of bounds, non-rectangular nested arrays, and programs that need more memory than the VM has (4096 words of globals).
+It reports, among others: unknown characters, unterminated strings, numbers above 65535, missing or stray block keywords, statements that are neither an assignment nor a call (`x`, `a == 1`), undefined variables, functions and labels, wrong argument counts, arithmetic on strings, assigning a whole row of an array, `return` outside a function, nested function definitions, constant array indexes out of bounds, non-rectangular nested arrays, programs that need more memory than the VM has (4096 words of globals), and, for the default `uw` target, fantasy console functions and strings built from themselves on lines that can run again.
+
+### Targets
+
+`--target uw` (the default) accepts only what the original game supports, so the output can become a real conversation. `--target console` also allows the fantasy console functions and the console's runtime string building.
 
 ## 12. Grammar
 

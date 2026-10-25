@@ -782,7 +782,9 @@ BUILTINS: Dict[str, Builtin] = {
     'draw_circle': Builtin(105, 4, order='console'),
     'draw_sprite': Builtin(106, 3, order='console'),
     'print': Builtin(107, 4, order='console'),
+    'fill_circle': Builtin(108, 4, order='console'),
     'flip_display': Builtin(109, 0, order='console'),
+    'get_pixel': Builtin(110, 2, order='console'),
     # Fantasy console: sound, input, math, system
     'play_tone': Builtin(200, 3, order='console'),
     'is_key_pressed': Builtin(300, 1, order='console'),
@@ -791,6 +793,7 @@ BUILTINS: Dict[str, Builtin] = {
     'math_cos': Builtin(502, 1, order='console'),
     'math_sqrt': Builtin(503, 1, order='console'),
     'delay': Builtin(900, 1, order='console'),
+    'get_frame': Builtin(901, 0, order='console'),
 }
 
 BABL_MENU = 0

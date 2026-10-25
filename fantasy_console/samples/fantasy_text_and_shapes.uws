@@ -1,0 +1,58 @@
+// Text and shapes: print() with the built-in font, filled circles, get_pixel()
+// collision checks, get_frame() timing and a short tone.
+// Controls: arrow keys or WASD move the ball, Z beeps, ESC quits.
+let KEY_UP = 0
+let KEY_DOWN = 1
+let KEY_LEFT = 2
+let KEY_RIGHT = 3
+let KEY_ESCAPE = 6
+let KEY_Z = 7
+
+let x = 64
+let y = 90
+let hits = 0
+
+label frame
+    clear_screen(12)
+
+    // A wall the ball cannot enter
+    fill_rect(40, 40, 48, 8, 9)
+
+    // Move, but undo the move if the ball would touch the wall
+    let old_x = x
+    let old_y = y
+    if is_key_pressed(KEY_LEFT)
+        x -= 2
+    endif
+    if is_key_pressed(KEY_RIGHT)
+        x += 2
+    endif
+    if is_key_pressed(KEY_UP)
+        y -= 2
+    endif
+    if is_key_pressed(KEY_DOWN)
+        y += 2
+    endif
+    if get_pixel(x, y - 5) == 9 or get_pixel(x, y + 5) == 9 or get_pixel(x - 5, y) == 9 or get_pixel(x + 5, y) == 9
+        x = old_x
+        y = old_y
+        hits += 1
+    endif
+
+    fill_circle(x, y, 4, 5)
+    draw_circle(x, y, 6, 1)
+
+    print(2, 2, "TEXT AND SHAPES", 1)
+    print(2, 10, "Frame " + get_frame(), 7)
+    print(2, 120, "Wall hits: " + hits, 15)
+
+    if is_key_released(KEY_Z)
+        play_tone(660, 80, 0)
+    endif
+
+    flip_display()
+
+    if not is_key_pressed(KEY_ESCAPE)
+        goto frame
+    endif
+exit
