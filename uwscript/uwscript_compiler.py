@@ -965,11 +965,12 @@ class FunctionInfo:
 class CodeGenerator:
     """Generates UW assembly from a UWScript AST."""
 
-    def __init__(self, source_name: Optional[str] = None, target: str = 'uw'):
+    def __init__(self, source_name: Optional[str] = None, target: str = 'uw', slot: Optional[int] = None):
         if target not in TARGETS:
             raise UWScriptError(f"Unknown target '{target}' (use one of: {', '.join(TARGETS)})")
         self.source_name = source_name
         self.target = target
+        self.slot = slot
         self.loop_depth = 0
         self.string_block = 1
         self.out: list = []
@@ -1931,6 +1932,8 @@ class CodeGenerator:
         lines = ["; UWScript compiled to Ultima Underworld conversation assembly"]
         if self.source_name:
             lines.append(f"; Source: {self.source_name}")
+        if self.slot is not None:
+            lines.append(f"; Slot: {self.slot:04X}")
         lines += [
             f"; String Block: {self.string_block}",
             f"; Memory Slots: {self.memory_end}",
@@ -1997,17 +2000,19 @@ def generate_strings_file(strings: List[str], block_id: int) -> str:
 
 
 def compile_uwscript(source: str, block_id: int = 1, debug: bool = False,
-                     source_name: Optional[str] = None, target: str = 'uw') -> Dict[str, str]:
+                     source_name: Optional[str] = None, target: str = 'uw',
+                     slot: Optional[int] = None) -> Dict[str, str]:
     """Compile UWScript source code.
 
     `target` is 'uw' (default: only what the original game supports) or
-    'console' (also the fantasy console functions).
+    'console' (also the fantasy console functions). `slot` is the
+    conversation slot in CNV.ARK, written as "; Slot:" for the game tools.
     Returns a dict with the "assembly" and "strings" file contents and a
     list of warnings. Raises UWScriptError on errors.
     """
     tokens = Lexer(source).tokenize()
     ast = Parser(tokens, debug=debug).parse()
-    generator = CodeGenerator(source_name, target)
+    generator = CodeGenerator(source_name, target, slot)
     assembly = generator.generate(ast, block_id)
     return {
         "assembly": assembly,
@@ -2037,6 +2042,9 @@ def main(argv=None) -> int:
     parser.add_argument("-t", "--target", choices=TARGETS, default='uw',
                         help="'uw' (default): only what Ultima Underworld supports; "
                              "'console': also the fantasy console functions")
+    parser.add_argument("--slot", type=lambda text: int(text, 16), metavar="HEX",
+                        help="conversation slot in CNV.ARK (hex), for tools/conversations/uw_cnv_compiler.py "
+                             "--update-cnv")
     parser.add_argument("-v", "--verbose", action="store_true", help="print the written files")
     parser.add_argument("--debug", action="store_true", help="print parser debug output and tracebacks")
     args = parser.parse_args(argv)
@@ -2051,7 +2059,8 @@ def main(argv=None) -> int:
     output, strings = default_output_paths(args.input, args.output, args.strings)
     try:
         result = compile_uwscript(source, args.block, debug=args.debug,
-                                  source_name=os.path.basename(args.input), target=args.target)
+                                  source_name=os.path.basename(args.input), target=args.target,
+                                  slot=args.slot)
     except UWScriptError as e:
         print(f"{args.input}: error: {e}", file=sys.stderr)
         if args.debug:

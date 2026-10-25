@@ -719,6 +719,8 @@ def reference_run(binary, strings_text, inputs=(), quests=None, game_values=None
             return state['reg']
         if name == 'sex':
             return value(1)
+        if name.startswith('find_'):
+            return 0  # the player carries nothing
         return 1
 
     regs = {'ip': 0, 'bp': 0xFFFF, 'level': 1}

@@ -13,10 +13,10 @@ A collection of Python utilities for analyzing, extracting, and modifying conten
 ### Conversation Tools (`tools/conversations/`)
 5. **uw_cnv_decompiler.py** - Extracts conversations from CNV.ARK, decompresses UW2 archives, and decompiles bytecode to readable assembly
 6. **uw_cnv_compiler.py** - Compiles conversation assembly files back to binary format and can update a slot in the CNV.ARK file
-7. **uw_cnv_runner.py** - A virtual machine for running and testing Ultima Underworld conversation scripts
+7. **uw_cnv_runner.py** - Runs conversation scripts in the terminal, with the same game-faithful VM as UWScript (`uwscript/uwscript_vm.py`)
 
 ### UWScript (`uwscript/`)
-A high-level language for conversations that compiles to UW conversation assembly, with its own VM (`uwscript_vm.py`) to run the result in the terminal:
+A high-level language for conversations that compiles to UW conversation assembly that the game tools above turn into real conversations. Its VM (`uwscript_vm.py`) follows the game's engine and runs the result in the terminal:
 
 ```bash
 python uwscript/uwscript_compiler.py uwscript/samples/conversation_gray_goblin.uws   # writes .asm + _strings.txt
@@ -43,7 +43,7 @@ The tools read and write files relative to the current working directory, so run
 
 ## Requirements
 
-- Python 3.6 or higher
+- Python 3.8 or higher
 - The string and conversation tools only use the Python standard library
 - Optional: translator backends - `pip install -r tools/strings/requirements-translator.txt` (see [docs/translator.md](docs/translator.md))
 - Optional: fantasy console - `pip install -r fantasy_console/requirements.txt`
@@ -156,7 +156,8 @@ This interactive tool allows you to:
 - Execute conversation scripts
 - Make dialogue choices
 - Test conversation logic
-- Simulate game world variables
+- Simulate game world variables (`--set npc_attitude=3`, `--quest 5=1`, `--item 128`)
+- Replay later talks with saved globals (`--globals state.json`)
 
 ## Notes on Editing
 

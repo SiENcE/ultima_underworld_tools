@@ -96,6 +96,7 @@ class FantasyConsole(UltimaUnderworldVM):
         self.max_frames = None            # stop after this many frames (headless runs)
         self.screenshot_path = None       # save the last frame as an image when the program ends
         self._warned_step_limit = False
+        self.vm_error = None
         
     def _register_console_functions(self):
         """Register new functions for the fantasy console"""
@@ -752,6 +753,7 @@ class FantasyConsole(UltimaUnderworldVM):
                     
                 except Exception as e:
                     print(f"VM Error at PC={self.pc}: {e}")
+                    self.vm_error = str(e)
                     self.finished = True
                     break
             
@@ -868,6 +870,8 @@ def main():
         traceback.print_exc()
         return 1
     
+    if console.vm_error:
+        return 1
     print("Program execution complete")
     return 0
 

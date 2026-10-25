@@ -69,6 +69,42 @@ gold += 20                  // compound assignment: += -= *= /= %=
 - Globals keep their value for the whole conversation. Locals exist only while the function runs; every call, including recursive calls, gets fresh ones.
 - Names of functions and built-in functions cannot be used as variable names.
 
+### Saved globals
+
+The game keeps a conversation's globals between talks with the same NPC. `let name` without a value (main program only) declares a global that is *not* set when the conversation starts, so it keeps the value from the last talk (0 the first time):
+
+```uwscript
+let visits                  // keeps its value between talks
+visits += 1
+if visits > 1
+    say "You again? That makes " + visits + " visits."
+endif
+```
+
+A `let` with a value sets the variable again every time. In the game, the size of the saved area per conversation is set in `babglobals.dat` (see [compiler-internals.md](compiler-internals.md#saved-globals)). In the VM, `--globals FILE` saves and restores the state between runs.
+
+### Game globals
+
+These variables are predefined. They read and change the player, the NPC and the game. The game fills them in when the conversation starts and takes changes back at the end, so `npc_attitude = 0` makes the NPC hostile.
+
+| Variables | Meaning |
+|-----------|---------|
+| `play_name` (string), `play_level`, `play_sex` (0 male, 1 female) | the player |
+| `play_hp`, `play_health`, `play_mana`, `play_hunger`, `play_poison`, `play_arms`, `play_power`, `play_drawn`, `new_player_exp` | more player properties |
+| `npc_name` (string), `npc_whoami`, `npc_level`, `npc_talkedto` (1 after the first talk) | the NPC |
+| `npc_attitude` (0 hostile, 1 upset, 2 mellow, 3 friendly), `npc_goal`, `npc_gtarg` | the NPC's mood and behaviour |
+| `npc_hp`, `npc_health`, `npc_hunger`, `npc_arms`, `npc_power`, `npc_xhome`, `npc_yhome` | more NPC properties |
+| `dungeon_level`, `game_days`, `game_time`, `game_mins`, `riddlecounter` | the game |
+
+```uwscript
+if npc_talkedto == 0
+    say "Greetings, " + play_name + ". I am " + npc_name + "."
+endif
+npc_talkedto = 1
+```
+
+Game globals are assigned without `let`, and their names cannot be used for other variables. In the VM, set them with `--set npc_attitude=3 --set play_name=Shanra`.
+
 ## 4. Operators
 
 From lowest to highest precedence:
@@ -253,17 +289,55 @@ All built-ins pass their arguments by reference, as the game expects; the compil
 
 ### Ultima Underworld functions
 
+These are the game's imported functions (see [conversation_spec.txt](../../docs/conversation_spec.txt) §7.6). A function marked – returns nothing and cannot be used as a value. `print` with four arguments is the fantasy console's version.
+
+**Dialogue and text**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `print(text)` | – | show a text no one speaks (a scene description) |
+| `compare(a, b)` | 0/1 | 1 if the strings are equal, ignoring case (`==` on strings uses it) |
+| `contains(text, part)` | 0/1 | 1 if `text` contains `part`, ignoring case |
+| `string_length(s)` | int | length of a string (the game's `length`) |
+| `sex(female, male)` | string | `female` for a female avatar, else `male` |
+
+**Quests and the world**
+
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `random(n)` | int | random number from 1 to n |
 | `get_quest(quest)` | int | value of quest flag `quest` |
 | `set_quest(quest, value)` | – | set quest flag `quest` to `value` |
-| `compare(a, b)` | 0/1 | 1 if the strings are equal, ignoring case |
-| `contains(text, part)` | 0/1 | 1 if `text` contains `part`, ignoring case |
-| `string_length(s)` | int | length of a string |
 | `gronk_door(x, y, close)` | int | open (`close` = 0) or close the door at tile (x, y) |
+| `place_object(x, y, slot)` | – | put an object from `do_inv_create` into the world |
+| `remove_talker()` | – | the NPC leaves |
+| `set_attitude(a, b)`, `set_race_attitude(...)` | – | change attitudes (arguments not fully known) |
+| `x_skills(a, b)`, `x_traps(a, b)` | int | skill and trap queries (arguments not fully known) |
+| `x_obj_stuff(...9 args)` | – | set object properties in the inventory list |
 
-In the terminal VM, `get_quest` returns 0 until the program sets a flag. You can preset flags with `--quest ID=VALUE`.
+**Inventory and bartering**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `setup_to_barter()` | – | start bartering, showing the NPC's items |
+| `show_inv(positions, ids)` | int | copy the player's barter items into two arrays (4 entries each) |
+| `do_offer(a1, ..., a5[, a6, a7])` | 0/1 | does the NPC accept the current deal |
+| `do_demand(refuse_text, agree_text)` | 0/1 | try to make the NPC hand over the items |
+| `do_judgement()`, `do_decline()` | – | judge the deal, decline it |
+| `give_to_npc(positions, count)` | int | give items from the player to the NPC |
+| `give_ptr_npc(quantity, position)` | int | give one item (quantity -1 to ignore) |
+| `take_from_npc(item)` | int | give the player an item (or a category if > 1000); 2 if no room |
+| `take_id_from_npc(position)`, `take_from_npc_inv(n)` | int | give the player an item by inventory position |
+| `do_inv_create(item)` | int | create an item for the NPC; returns its inventory position |
+| `do_inv_delete(item)` | int | delete an item from the NPC |
+| `check_inv_quality(position)` / `set_inv_quality(quality, position)` | int | read / set an item's quality |
+| `count_inv(item)` | int | count items |
+| `identify_inv(a, b, c, position)` | int | identify an item |
+| `find_inv(where, item)` | int | find an item (`where` 0 NPC, 1 player); 0 if not found |
+| `find_barter(item)`, `find_barter_total(a, b, c, d)` | int | find items in the barter area |
+| `set_likes_dislikes(likes, dislikes)` | – | arrays of item types the NPC likes or dislikes, ending with -1 |
+
+In the terminal VM, these functions print what they would do and return plausible values. `get_quest` returns 0 until the program sets a flag, `find_inv` finds only the items given with `--item ID`, and `sex` follows `--set play_sex=1`.
 
 ### Fantasy console functions
 
@@ -296,7 +370,7 @@ The compiler stops at the first error and reports its line (and usually its colu
 shop.uws: error: Line 12, column 1: Missing 'endif' for 'if' started at line 4
 ```
 
-It reports, among others: unknown characters, unterminated strings, numbers above 65535, missing or stray block keywords, statements that are neither an assignment nor a call (`x`, `a == 1`), undefined variables, functions and labels, wrong argument counts, arithmetic on strings, assigning a whole row of an array, `return` outside a function, nested function definitions, constant array indexes out of bounds, non-rectangular nested arrays, programs that need more memory than the VM has (4096 words of globals), and, for the default `uw` target, fantasy console functions and strings built from themselves on lines that can run again.
+It reports, among others: unknown characters, unterminated strings, numbers above 65535, missing or stray block keywords, statements that are neither an assignment nor a call (`x`, `a == 1`), undefined variables, functions and labels, wrong argument counts, arithmetic on strings, assigning a whole row of an array, `return` outside a function, nested function definitions, constant array indexes out of bounds, non-rectangular nested arrays, using a void function as a value, redeclaring a game global, programs that need more than 0x8000 words of globals, and, for the default `uw` target, fantasy console functions and strings built from themselves on lines that can run again.
 
 ### Targets
 
@@ -310,7 +384,7 @@ statement      = ( declaration | assignment | call | if | while | function
                  | return | say | ask | menu | filtermenu | goto | label | "exit" ) end ;
 end            = [ comment ] ( newline | end_of_file ) ;
 
-declaration    = "let" identifier "=" ( expression | array_literal ) ;
+declaration    = "let" identifier [ "=" ( expression | array_literal ) ] ;   (* no value: saved global *)
 assignment     = target ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" ) expression ;
 target         = identifier { "[" expression "]" } ;
 call           = identifier "(" [ expression { "," expression } ] ")" ;

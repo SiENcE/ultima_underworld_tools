@@ -25,10 +25,10 @@
             <Keywords name="Folders in comment, middle"></Keywords>
             <Keywords name="Folders in comment, close"></Keywords>
             <Keywords name="Keywords1">if else elseif endif while endwhile function endfunction return say ask menu filtermenu and or not goto label exit</Keywords>
-            <Keywords name="Keywords2">random get_quest set_quest compare string_length contains gronk_door</Keywords>
+            <Keywords name="Keywords2">random get_quest set_quest compare string_length contains gronk_door sex place_object remove_talker set_attitude set_race_attitude x_skills x_traps x_obj_stuff show_inv give_to_npc give_ptr_npc take_from_npc take_id_from_npc take_from_npc_inv identify_inv do_offer do_demand do_inv_create do_inv_delete check_inv_quality set_inv_quality count_inv setup_to_barter do_judgement do_decline set_likes_dislikes find_inv find_barter find_barter_total</Keywords>
             <Keywords name="Keywords3">let true false</Keywords>
             <Keywords name="Keywords4">clear_screen set_pixel draw_line draw_rect fill_rect draw_circle fill_circle draw_sprite print flip_display get_pixel play_tone is_key_pressed is_key_released math_sin math_cos math_sqrt delay get_frame</Keywords>
-            <Keywords name="Keywords5"></Keywords>
+            <Keywords name="Keywords5">play_hunger play_health play_arms play_power play_hp play_mana play_level new_player_exp play_name play_poison play_drawn play_sex npc_xhome npc_yhome npc_whoami npc_hunger npc_health npc_hp npc_arms npc_power npc_goal npc_attitude npc_gtarg npc_talkedto npc_level npc_name dungeon_level riddlecounter game_time game_days game_mins</Keywords>
             <Keywords name="Keywords6"></Keywords>
             <Keywords name="Keywords7"></Keywords>
             <Keywords name="Keywords8"></Keywords>
