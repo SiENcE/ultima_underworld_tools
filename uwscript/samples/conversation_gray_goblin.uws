@@ -1,4 +1,4 @@
-// Simple Greeting - Compatible version
+// Conversation: the Gray Goblin greets the player and answers two menus
 let player_visited = 0
 
 // Begin conversation

@@ -182,7 +182,8 @@ label_name:        ; Label definition
 ; Jump to a label
 JMP label_name    
 
-; Branch relative (offset in words)
+; Branch relative (offset in words from the operand word:
+; target = address of BRA + 1 + offset)
 BRA 5             
 
 ; Call a subroutine
@@ -976,7 +977,24 @@ python tools/conversations/uw_cnv_runner.py conversation.asm --strings uw-string
 ```
 
 Options:
+- `--strings FILE` - String block file (default: `<conversation>_strings.txt`, else `uw-strings.txt`)
+- `--set NAME=VALUE` - Set a game global, e.g. `npc_attitude=3`
+- `--quest ID=VALUE` - Preset a quest flag
+- `--item ID` - An item the player carries
+- `--globals FILE` - Keep the conversation state between runs
 - `--debug` - Show detailed execution trace
+
+The runner uses the shared VM in `uwscript/uwscript_vm.py`. It reads the memory slot count and the import table of the conversation, so decompiled conversations run as in the game.
+
+### UWScript (uwscript/)
+
+Instead of writing assembly by hand, you can write conversations in UWScript, a small high-level language, and compile them to assembly:
+```bash
+python uwscript/uwscript_compiler.py my_conversation.uws      # writes my_conversation.asm + my_conversation_strings.txt
+python uwscript/uwscript_vm.py my_conversation.uws            # compile and test in the terminal
+```
+
+See [uwscript/README.md](../uwscript/README.md) and the [language reference](../uwscript/docs/uwscript-language-spec.md).
 
 ---
 

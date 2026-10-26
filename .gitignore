@@ -28,6 +28,8 @@ strings-analysis.json
 /cnv/
 /conversations/
 fantasy_console/output.asm
+uwscript/samples/*.asm
+fantasy_console/samples/*.asm
 *_strings.txt
 fantasy_console/uw-strings.txt
 

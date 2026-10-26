@@ -1,5 +1,4 @@
-// Shopkeeper conversation
-// String Block: 1
+// Conversation: a shopkeeper with labels/goto, filtermenu and quest flags
 
 // Initialize variables
 let player_name = "Avatar"

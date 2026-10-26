@@ -1,19 +1,36 @@
-# fantasy_console.py - Enhanced version with sprite data support
+# fantasy_console.py - a 128x128, 16 color fantasy console built on the UWScript VM
 
+import array
+import math
 import pygame
 import sys
 import os
 import argparse
 import time
 
+from console_font import text_pixels
+
 # The VM and the UWScript compiler live in ../uwscript
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uwscript'))
-from uw_cnv_runner import UltimaUnderworldVM
+from uwscript_vm import UltimaUnderworldVM, load_program
 
 class FantasyConsole(UltimaUnderworldVM):
     """Fantasy console based on the Ultima Underworld VM"""
     
-    def __init__(self, debug=False):
+    # Key codes for is_key_pressed/is_key_released and the keys that trigger them
+    KEY_CODES = {
+        0: (pygame.K_UP, pygame.K_w),
+        1: (pygame.K_DOWN, pygame.K_s),
+        2: (pygame.K_LEFT, pygame.K_a),
+        3: (pygame.K_RIGHT, pygame.K_d),
+        4: (pygame.K_SPACE,),
+        5: (pygame.K_RETURN,),
+        6: (pygame.K_ESCAPE,),
+        7: (pygame.K_z,),
+        8: (pygame.K_x,),
+    }
+
+    def __init__(self, debug=False, scale=4, title="FantasyUW Console"):
         super().__init__(debug)
         
         # Initialize pygame
@@ -28,10 +45,10 @@ class FantasyConsole(UltimaUnderworldVM):
         # Display settings
         self.screen_width = 128
         self.screen_height = 128
-        self.pixel_scale = 4  # Scale up for visibility
+        self.pixel_scale = scale  # Scale up for visibility
         self.screen = pygame.display.set_mode((self.screen_width * self.pixel_scale, 
                                                self.screen_height * self.pixel_scale))
-        pygame.display.set_caption("FantasyUW Console")
+        pygame.display.set_caption(title)
         
         # Color palette (16 colors)
         self.palette = [
@@ -73,8 +90,13 @@ class FantasyConsole(UltimaUnderworldVM):
         self.frame_delay = 1.0 / self.fps
         
         # Execution control
-        self.max_steps_per_frame = 5000  # Prevent infinite loops
+        self.max_steps_per_frame = 20000  # Instructions per frame before the frame is cut short
         self.display_update_requested = False
+        self.frame_count = 0
+        self.max_frames = None            # stop after this many frames (headless runs)
+        self.screenshot_path = None       # save the last frame as an image when the program ends
+        self._warned_step_limit = False
+        self.vm_error = None
         
     def _register_console_functions(self):
         """Register new functions for the fantasy console"""
@@ -90,7 +112,9 @@ class FantasyConsole(UltimaUnderworldVM):
         self.imported_functions[105] = self.func_gfx_circle
         self.imported_functions[106] = self.func_gfx_sprite
         self.imported_functions[107] = self.func_gfx_print
+        self.imported_functions[108] = self.func_gfx_fill_circle
         self.imported_functions[109] = self.func_gfx_flip
+        self.imported_functions[110] = self.func_gfx_get_pixel
         
         # Sound functions (200-299)
         self.imported_functions[200] = self.func_snd_play_tone
@@ -106,6 +130,7 @@ class FantasyConsole(UltimaUnderworldVM):
         
         # System functions (900-999)
         self.imported_functions[900] = self.func_sys_delay
+        self.imported_functions[901] = self.func_sys_frame_count
     
     # Graphics functions
     
@@ -120,9 +145,9 @@ class FantasyConsole(UltimaUnderworldVM):
             color = 0  # Default to black
         
         # Clear buffer
-        for y in range(self.screen_height):
-            for x in range(self.screen_width):
-                self.display_buffer[y][x] = color
+        blank = [color] * self.screen_width
+        for row in self.display_buffer:
+            row[:] = blank
         
         self.log(f"GFX_CLEAR: Cleared screen with color {color}")
         self.result_register = 1  # Success
@@ -166,13 +191,8 @@ class FantasyConsole(UltimaUnderworldVM):
             y1 = self.get_mem(ptr_y1)
             x1 = self.get_mem(ptr_x1)
             
-            # Clip coordinates to screen bounds
-            x1 = max(0, min(self.screen_width - 1, x1))
-            y1 = max(0, min(self.screen_height - 1, y1))
-            x2 = max(0, min(self.screen_width - 1, x2))
-            y2 = max(0, min(self.screen_height - 1, y2))
-            
-            # Simple line drawing (Bresenham's algorithm)
+            # Bresenham's algorithm; pixels outside the screen are skipped
+            # (clamping the end points would bend lines that leave the screen)
             dx = abs(x2 - x1)
             dy = abs(y2 - y1)
             sx = 1 if x1 < x2 else -1
@@ -283,16 +303,13 @@ class FantasyConsole(UltimaUnderworldVM):
             # Get the text from string block
             text = self.get_string(text_id)
             
-            # We would need a font system for proper text rendering
-            # For now, just log it
             self.log(f"GFX_PRINT: '{text}' at ({x}, {y}) with color {color}")
             
-            # Simple text rendering as a colored line
-            if 0 <= y < self.screen_height:
-                for i in range(len(text)):
-                    px = x + i
-                    if 0 <= px < self.screen_width:
-                        self.display_buffer[y][px] = color
+            # 3x5 pixel font, 4 pixels per character, '\n' starts a new line
+            for dx, dy in text_pixels(text):
+                px, py = x + dx, y + dy
+                if 0 <= px < self.screen_width and 0 <= py < self.screen_height:
+                    self.display_buffer[py][px] = color
             
             self.result_register = 1  # Success
         else:
@@ -374,6 +391,41 @@ class FantasyConsole(UltimaUnderworldVM):
             self.log("GFX_CIRCLE: Not enough arguments")
             self.result_register = 0  # Failure
 
+    def func_gfx_fill_circle(self):
+        """Draw a filled circle (ID: 108): fill_circle(x, y, radius, color)"""
+        args = self.pop()
+        if args < 4:
+            self.result_register = 0
+            return
+        ptr_color, ptr_radius, ptr_y, ptr_x = self.pop(), self.pop(), self.pop(), self.pop()
+        color = self.get_mem(ptr_color) & 0xF
+        radius = self.get_mem(ptr_radius)
+        cy = self.get_mem(ptr_y)
+        cx = self.get_mem(ptr_x)
+        if radius >= 0:
+            for dy in range(-radius, radius + 1):
+                y = cy + dy
+                if not 0 <= y < self.screen_height:
+                    continue
+                half = int(math.sqrt(radius * radius - dy * dy) + 0.5)
+                row = self.display_buffer[y]
+                for x in range(max(0, cx - half), min(self.screen_width, cx + half + 1)):
+                    row[x] = color
+        self.result_register = 1
+
+    def func_gfx_get_pixel(self):
+        """Read the color of a pixel (ID: 110): get_pixel(x, y); -1 outside the screen"""
+        args = self.pop()
+        if args < 2:
+            self.result_register = -1
+            return
+        ptr_y, ptr_x = self.pop(), self.pop()
+        x, y = self.get_mem(ptr_x), self.get_mem(ptr_y)
+        if 0 <= x < self.screen_width and 0 <= y < self.screen_height:
+            self.result_register = self.display_buffer[y][x]
+        else:
+            self.result_register = -1
+
     def func_gfx_sprite(self):
         """Optimized sprite rendering (replace existing func_gfx_sprite)"""
         args = self.pop()
@@ -453,37 +505,33 @@ class FantasyConsole(UltimaUnderworldVM):
             # For this minimal version, we'll just log it
             self.log(f"SND_PLAY_TONE: Playing {frequency}Hz for {duration}ms on channel {channel}")
             
-            # If pygame.mixer is initialized, we could generate a simple tone
             try:
-                import pygame.mixer
-                if pygame.mixer.get_init():
-                    # Create a sound sample
-                    sample_rate = 22050
-                    bits = -16  # signed 16-bit
-                    duration_sec = duration / 1000.0
-                    
-                    # Create a sound buffer of the right size
-                    buffer_size = int(sample_rate * duration_sec)
-                    
-                    # Generate a sine wave
-                    import math
-                    import numpy as np
-                    
-                    arr = np.sin(2 * math.pi * frequency * np.arange(buffer_size) / sample_rate)
-                    arr = (arr * 32767).astype(np.int16)
-                    
-                    # Create a Sound object and play it
-                    sound = pygame.mixer.Sound(arr)
-                    sound.play()
-            except:
-                # Fall back to silent operation if sound generation fails
-                pass
+                sound = self._make_tone(frequency, duration)
+                if sound is not None:
+                    pygame.mixer.Channel(channel).play(sound)
+            except pygame.error as e:
+                self.log(f"SND_PLAY_TONE: sound failed: {e}")
             
             self.result_register = 1  # Success
         else:
             self.log("SND_PLAY_TONE: Not enough arguments")
             self.result_register = 0  # Failure
     
+    def _make_tone(self, frequency, duration_ms):
+        """A square wave tone matching the mixer's format, or None without a mixer"""
+        mixer = pygame.mixer.get_init()
+        if not mixer or frequency <= 0 or duration_ms <= 0:
+            return None
+        sample_rate, size, channels = mixer
+        if abs(size) != 16:
+            return None
+        samples = int(sample_rate * duration_ms / 1000)
+        period = max(1, int(sample_rate / frequency))
+        volume = 6000
+        wave = array.array('h', (volume if (i % period) < period // 2 else -volume
+                                 for i in range(samples) for _ in range(channels)))
+        return pygame.mixer.Sound(buffer=wave.tobytes())
+
     # Input functions
     
     def func_input_key_pressed(self):
@@ -494,11 +542,8 @@ class FantasyConsole(UltimaUnderworldVM):
             ptr_key = self.pop()
             key_code = self.get_mem(ptr_key)
             
-            # Map key code to pygame key constant
-            pygame_key = self._map_key_code(key_code)
-            
-            # Check if key is in pressed keys set
-            is_pressed = pygame_key in self.keys_pressed
+            # Any of the keys mapped to this code counts
+            is_pressed = any(key in self.keys_pressed for key in self.KEY_CODES.get(key_code, ()))
             
             self.log(f"INPUT_KEY_PRESSED: Key {key_code} is {'pressed' if is_pressed else 'not pressed'}")
             self.result_register = 1 if is_pressed else 0
@@ -514,11 +559,11 @@ class FantasyConsole(UltimaUnderworldVM):
             ptr_key = self.pop()
             key_code = self.get_mem(ptr_key)
             
-            # Map key code to pygame key constant
-            pygame_key = self._map_key_code(key_code)
-            
-            # Check if key was in previous keys but not in current keys
-            is_released = pygame_key in self.previous_keys_pressed and pygame_key not in self.keys_pressed
+            # Released: held in the previous frame, not held now
+            keys = self.KEY_CODES.get(key_code, ())
+            was_held = any(key in self.previous_keys_pressed for key in keys)
+            is_held = any(key in self.keys_pressed for key in keys)
+            is_released = was_held and not is_held
             
             self.log(f"INPUT_KEY_RELEASED: Key {key_code} is {'released' if is_released else 'not released'}")
             self.result_register = 1 if is_released else 0
@@ -527,6 +572,7 @@ class FantasyConsole(UltimaUnderworldVM):
             self.result_register = 0  # Failure
 
     # Math functions
+    # (sin/cos take degrees and return the value scaled by 100)
     
     def func_math_sin(self):
         """Sine function (ID: 501)"""
@@ -606,34 +652,34 @@ class FantasyConsole(UltimaUnderworldVM):
             self.log("SYS_DELAY: Not enough arguments")
             self.result_register = 0  # Failure
     
+    def func_sys_frame_count(self):
+        """Number of frames shown so far (ID: 901), wrapping at 32768"""
+        self.pop()  # argument count (0)
+        self.result_register = self.frame_count & 0x7FFF
+
     def _map_key_code(self, key_code):
-        """Map UW key codes to pygame key constants"""
-        key_map = {
-            0: pygame.K_UP,
-            1: pygame.K_DOWN,
-            2: pygame.K_LEFT,
-            3: pygame.K_RIGHT,
-            4: pygame.K_SPACE,
-            5: pygame.K_RETURN,
-            6: pygame.K_ESCAPE,
-        }
-        return key_map.get(key_code, pygame.K_UNKNOWN)
+        """Map a key code to its main pygame key constant"""
+        return self.KEY_CODES.get(key_code, (pygame.K_UNKNOWN,))[0]
         
+    def render_surface(self):
+        """The current frame as a 128x128 pygame surface"""
+        data = b''.join(bytes(row) for row in self.display_buffer)
+        surface = pygame.image.frombuffer(data, (self.screen_width, self.screen_height), 'P')
+        surface.set_palette(self.palette)
+        return surface
+
     def update_display(self):
         """Update the pygame display with the current buffer"""
-        self.screen.fill((0, 0, 0))
-        
-        for y in range(self.screen_height):
-            for x in range(self.screen_width):
-                color = self.palette[self.display_buffer[y][x]]
-                pygame.draw.rect(
-                    self.screen,
-                    color,
-                    (x * self.pixel_scale, y * self.pixel_scale, self.pixel_scale, self.pixel_scale)
-                )
-        
+        frame = pygame.transform.scale(self.render_surface(), self.screen.get_size())
+        self.screen.blit(frame, (0, 0))
         pygame.display.flip()
         self.display_update_requested = False
+        self.frame_count += 1
+
+    def save_screenshot(self, path):
+        """Save the current frame (unscaled 128x128) as an image"""
+        pygame.image.save(self.render_surface(), path)
+        print(f"Screenshot saved to {path}")
         
     def handle_input(self):
         """Handle pygame events and update input state"""
@@ -643,38 +689,20 @@ class FantasyConsole(UltimaUnderworldVM):
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            
-            # Track key press/release events
+                self.finished = True
             elif event.type == pygame.KEYDOWN:
                 self.log(f"Key pressed: {event.key}")
+                if event.key == pygame.K_F12:
+                    self.save_screenshot(f"screenshot_{self.frame_count:05d}.png")
             elif event.type == pygame.KEYUP:
                 self.log(f"Key released: {event.key}")
         
-        # Get current key state
+        # Store the currently held keys that are mapped to key codes
         keys = pygame.key.get_pressed()
-        
-        # Map pygame keys to our key codes
-        key_map = {
-            pygame.K_UP: 0,
-            pygame.K_DOWN: 1,
-            pygame.K_LEFT: 2,
-            pygame.K_RIGHT: 3,
-            pygame.K_SPACE: 4,
-            pygame.K_RETURN: 5,
-            pygame.K_ESCAPE: 6,
-            # Add more keys as needed
-        }
-        
-        # Store pressed keys
-        for pygame_key in key_map.keys():
-            if keys[pygame_key]:
-                self.keys_pressed.add(pygame_key)
-                
-        # For debugging
-        if keys[pygame.K_ESCAPE]:
-            self.log("ESC key is pressed!")
+        for mapped in self.KEY_CODES.values():
+            for pygame_key in mapped:
+                if keys[pygame_key]:
+                    self.keys_pressed.add(pygame_key)
         
     def execute_game_loop(self):
         """Optimized game loop with performance monitoring"""
@@ -693,9 +721,9 @@ class FantasyConsole(UltimaUnderworldVM):
             # Handle input
             self.handle_input()
             
-            # Execute VM instructions with optimized limits
+            # Execute VM instructions until flip_display() or the step limit
             steps = 0
-            max_steps = 10000  # Increased for complex games
+            max_steps = self.max_steps_per_frame
             
             should_execute_more = True
             
@@ -717,16 +745,22 @@ class FantasyConsole(UltimaUnderworldVM):
                     if self.display_update_requested:
                         should_execute_more = False
                     elif steps >= max_steps:
-                        print(f"Warning: Frame exceeded {max_steps} steps")
+                        if not self._warned_step_limit:
+                            print(f"Warning: a frame needed more than {max_steps} instructions; it is "
+                                  f"shown unfinished (raise the limit with --steps)")
+                            self._warned_step_limit = True
                         should_execute_more = False
                     
                 except Exception as e:
                     print(f"VM Error at PC={self.pc}: {e}")
+                    self.vm_error = str(e)
                     self.finished = True
                     break
             
             # Update display
             self.update_display()
+            if self.max_frames is not None and self.frame_count >= self.max_frames:
+                self.finished = True
             
             # Performance monitoring
             frame_time = time.time() - frame_start
@@ -743,15 +777,13 @@ class FantasyConsole(UltimaUnderworldVM):
                 last_frame_time = time.time()
                 performance_counter = 0
             
-            # Limit frame rate
+            # Limit frame rate (headless runs go as fast as possible)
             target_frame_time = 1.0 / self.fps
-            if frame_time < target_frame_time:
+            if frame_time < target_frame_time and self.max_frames is None:
                 time.sleep(target_frame_time - frame_time)
             
-            # Handle waiting response
-            if self.waiting_response:
-                pass
-        
+        if self.screenshot_path:
+            self.save_screenshot(self.screenshot_path)
         pygame.quit()
 
     # PATCH 4: Add performance profiling function
@@ -786,34 +818,45 @@ class FantasyConsole(UltimaUnderworldVM):
 def main():
     """Main function to run the FantasyUW console"""
     parser = argparse.ArgumentParser(description='FantasyUW Console')
-    parser.add_argument('program', help='Path to assembly program')
-    parser.add_argument('--strings', help='Path to the string block file', default='uw-strings.txt')
+    parser.add_argument('program', help='program to run: assembly (.asm) or UWScript source (.uws)')
+    parser.add_argument('--strings', help='string block file (default: <program>_strings.txt)')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     parser.add_argument('--fps', type=int, help='Target frames per second', default=30)
+    parser.add_argument('--scale', type=int, default=4, help='Window pixels per console pixel (default: 4)')
+    parser.add_argument('--steps', type=int, default=20000,
+                        help='Instructions per frame before a frame is cut short (default: 20000)')
+    parser.add_argument('--headless', action='store_true', help='Run without a window (for tests and screenshots)')
+    parser.add_argument('--frames', type=int, help='Stop after this many frames')
+    parser.add_argument('--screenshot', metavar='FILE', help='Save the last frame as an image (e.g. out.png)')
+    parser.add_argument('--profile', action='store_true', help='Print an instruction profile before running')
     args = parser.parse_args()
+
+    if args.headless:
+        os.environ['SDL_VIDEODRIVER'] = 'dummy'
+        os.environ['SDL_AUDIODRIVER'] = 'dummy'
     
     if not os.path.exists(args.program):
         print(f"Error: Program file '{args.program}' not found")
-        return
+        return 1
     
     print("=== FantasyUW Console ===")
     
     # Create console
-    console = FantasyConsole(debug=args.debug)
-    console.profile_vm_performance()  # Before loading
+    console = FantasyConsole(debug=args.debug, scale=args.scale,
+                             title=f"FantasyUW Console - {os.path.basename(args.program)}")
     console.fps = args.fps
     console.frame_delay = 1.0 / args.fps
+    console.max_steps_per_frame = args.steps
+    console.max_frames = args.frames
+    console.screenshot_path = args.screenshot
     
-    # Load strings if available
-    if args.strings and os.path.exists(args.strings):
-        console.load_string_blocks(args.strings)
-    else:
-        print(f"Warning: String file '{args.strings}' not found")
-    
-    # Load assembly directly
-    if not console.parse_asm(args.program):
-        print("Error parsing assembly")
-        return
+    # Load (or compile) the program and its strings
+    error = load_program(console, args.program, args.strings, target='console')
+    if error:
+        print(f"Error: {error}")
+        return 1
+    if args.profile:
+        console.profile_vm_performance()
     
     # Initialize memory
     console.initialize_memory()
@@ -825,8 +868,12 @@ def main():
         print(f"Error during execution: {e}")
         import traceback
         traceback.print_exc()
+        return 1
     
+    if console.vm_error:
+        return 1
     print("Program execution complete")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

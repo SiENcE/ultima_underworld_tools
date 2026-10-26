@@ -1,0 +1,50 @@
+// Functions: parameters, return values, recursion and access to globals
+
+let gold = 100
+
+// Parameters arrive in the order they are written
+function describe_trade(item, price)
+    say "The " + item + " costs " + price + " gold."
+endfunction
+
+// A return value can be used in any expression
+function discounted(price, percent)
+    return price - price * percent / 100
+endfunction
+
+// Functions see global variables (unless a local or parameter has the same name)
+function pay(amount)
+    if amount > gold
+        return 0
+    endif
+    gold -= amount
+    return 1
+endfunction
+
+// Recursion works; every call gets its own frame
+function fibonacci(n)
+    if n <= 1
+        return n
+    endif
+    return fibonacci(n - 1) + fibonacci(n - 2)
+endfunction
+
+// Functions can build and return strings
+function title(name)
+    return "Sir " + name
+endfunction
+
+describe_trade("lantern", 30)
+let price = discounted(30, 10)
+say "With a 10% discount it costs " + price + " gold."
+
+if pay(price)
+    say "Paid. " + gold + " gold left."
+endif
+if not pay(500)
+    say "You cannot afford 500 gold."
+endif
+
+say "fibonacci(10) = " + fibonacci(10)
+say "Farewell, " + title("Garamon") + "!"
+exit

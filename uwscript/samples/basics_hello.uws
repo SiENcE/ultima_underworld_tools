@@ -1,3 +1,5 @@
+// Hello: a variable, an if/else and the end of the conversation
+
 let player_visited = 1
 
 // Begin conversation

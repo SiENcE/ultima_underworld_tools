@@ -302,8 +302,9 @@ class ConversationCompiler:
             
             # Handle branch instructions (relative offsets)
             if opcode_name in ['BEQ', 'BNE', 'BRA']:
-                # Calculate relative offset (target - current - 2)
-                offset = target_pos - (self.current_pos + 2)
+                # Relative to the operand word, as in the game's VM:
+                # target = instruction address + 1 + offset
+                offset = (target_pos - (self.current_pos + 1)) & 0xFFFF
                 self.log(f"Branch from {self.current_pos} to {target_pos}, offset={offset}")
                 return offset
             elif opcode_name in ['JMP', 'CALL']:
@@ -314,14 +315,14 @@ class ConversationCompiler:
         # Handle hex values
         if arg_str.startswith('0x'):
             try:
-                return int(arg_str, 16)
+                return int(arg_str, 16) & 0xFFFF
             except ValueError:
                 print(f"Error: Invalid hex value: {arg_str}")
                 return 0
         
         # Handle decimal values
         try:
-            return int(arg_str)
+            return int(arg_str) & 0xFFFF  # negative operands as 16-bit words
         except ValueError:
             print(f"Error: Cannot resolve argument '{arg_str}' - not a valid number or label")
             # Return 0 as fallback to avoid crashing

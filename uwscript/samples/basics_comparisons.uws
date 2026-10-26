@@ -1,4 +1,4 @@
-// Simple if-else test
+// Comparisons: >, <, ==, <=, >= and if/else
 let health = 50
 
 say "Checking health status..."

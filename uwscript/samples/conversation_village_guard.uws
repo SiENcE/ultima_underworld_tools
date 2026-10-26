@@ -1,0 +1,46 @@
+// Conversation: a guard who remembers the player.
+// Shows game globals (play_name, npc_talkedto, npc_attitude), a saved global
+// that keeps its value between talks, sex() and a few inventory functions.
+//
+// Replay later talks with the VM:
+//   python uwscript_vm.py samples/conversation_village_guard.uws --globals guard_state.json
+//   python uwscript_vm.py samples/conversation_village_guard.uws --set play_sex=1 --item 128
+
+// Saved global: 0 the first time, then whatever the last talk left
+let bribes
+
+if npc_talkedto == 0
+    say "Halt! Who goes there?"
+    say "Ah, " + play_name + ". I have heard of you."
+else
+    say "Back again, " + sex("milady", "sir") + "?"
+endif
+npc_talkedto = 1
+
+if bribes > 0
+    say "You paid me " + bribes + " time(s) already. I like you."
+endif
+
+menu choice [
+    "May I pass?",
+    "Here, take this for your trouble.",
+    "Farewell."
+]
+
+if choice == 1
+    if npc_attitude >= 3 or bribes > 1
+        say "Go ahead."
+        gronk_door(12, 40, 0)
+    elseif find_inv(1, 128)
+        say "Not with that sword drawn. Put it away first."
+    else
+        say "Not today."
+    endif
+elseif choice == 2
+    bribes += 1
+    npc_attitude += 1
+    say "Much obliged, " + play_name + "."
+else
+    say "Stay out of trouble."
+endif
+exit

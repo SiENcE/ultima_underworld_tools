@@ -1,625 +1,432 @@
-# UWScript Language Specification (Complete)
+# UWScript Language Reference
 
-UWScript is a high-level language for creating conversations in Ultima Underworld games and fantasy console applications. It provides a simpler syntax than raw assembly while maintaining full access to the game's functions and state.
+UWScript is a small, line-based language for writing Ultima Underworld conversations (and programs for the [fantasy console](../../fantasy_console/README.md)). The compiler turns a `.uws` file into conversation assembly plus a string block; see [compiler-internals.md](compiler-internals.md) for what the generated code looks like.
 
-## Table of Contents
-1. [Basic Syntax](#basic-syntax)
-2. [Data Types](#data-types)
-3. [Arrays](#arrays)
-4. [Variables and Assignment](#variables-and-assignment)
-5. [Control Flow](#control-flow)
-6. [Functions](#functions)
-7. [Dialogue System](#dialogue-system)
-8. [Built-in Functions](#built-in-functions)
-9. [Fantasy Console Functions](#fantasy-console-functions)
-10. [Operators](#operators)
-11. [String Operations](#string-operations)
-12. [Memory Model](#memory-model)
-13. [EBNF Grammar](#ebnf-grammar)
-14. [Compilation](#compilation)
-15. [Examples](#examples)
+## Contents
 
-## Basic Syntax
+1. [Program structure](#1-program-structure)
+2. [Values and types](#2-values-and-types)
+3. [Variables](#3-variables)
+4. [Operators](#4-operators)
+5. [Strings](#5-strings)
+6. [Arrays](#6-arrays)
+7. [Control flow](#7-control-flow)
+8. [Functions](#8-functions)
+9. [Dialogue](#9-dialogue)
+10. [Built-in functions](#10-built-in-functions)
+11. [Compile errors](#11-compile-errors)
+12. [Grammar](#12-grammar)
+13. [Examples](#13-examples)
 
-UWScript uses a statement-based syntax similar to BASIC or Pascal. Each statement typically occupies one line, and blocks are delimited with keywords rather than braces.
+## 1. Program structure
 
-### Comments
+A program is a list of statements, one per line. Blocks are closed with keywords (`endif`, `endwhile`, `endfunction`), and indentation is free.
+
 ```uwscript
-// Single-line comments start with //
-let x = 5  // Comments can appear at end of line
+// A comment runs to the end of the line
+let visits = get_quest(10)     // comments may follow a statement
 
-// Multi-line comments are achieved with multiple single-line comments
-// This is line 1 of a multi-line comment
-// This is line 2 of a multi-line comment
-```
-
-## Data Types
-
-UWScript supports the following data types:
-
-- **Integer**: Whole numbers (e.g., `42`, `-1`, `0`)
-- **String**: Text enclosed in double quotes (e.g., `"Hello"`, `"Avatar"`)
-- **Boolean**: `true` or `false`
-- **Array**: Ordered collections of values (e.g., `[1, 2, 3]`, `["a", "b", "c"]`)
-
-## Arrays
-
-Arrays are ordered collections of values that can be accessed by index.
-
-### Array Literals
-```uwscript
-// Basic array literal
-let numbers = [1, 2, 3, 4, 5]
-
-// Mixed-type arrays
-let mixed = [42, "text", true, 100]
-
-// Empty array
-let empty = []
-
-// Multi-line arrays (useful for sprite data)
-let sprite = [
-    8, 8,              // Width, Height
-    1, 1, 0, 0, 0, 0, 1, 1,  // Row 1
-    1, 0, 1, 1, 1, 1, 0, 1,  // Row 2
-    0, 1, 1, 2, 2, 1, 1, 0,  // Row 3 (red eyes)
-    0, 1, 1, 1, 1, 1, 1, 0,  // Row 4
-    0, 1, 1, 3, 3, 1, 1, 0,  // Row 5 (green smile)
-    0, 1, 1, 1, 1, 1, 1, 0,  // Row 6
-    1, 0, 1, 1, 1, 1, 0, 1,  // Row 7
-    1, 1, 0, 0, 0, 0, 1, 1   // Row 8
-]
-```
-
-### Array Access
-```uwscript
-let numbers = [10, 20, 30, 40, 50]
-
-// Access elements by index (0-based)
-let first = numbers[0]   // 10
-let third = numbers[2]   // 30
-
-// Use expressions as indices
-let i = 1
-let second = numbers[i]  // 20
-let fourth = numbers[i + 2]  // 40
-
-// Multidimensional arrays (simulated with linear arrays)
-let grid = [
-    1, 2, 3,  // Row 0
-    4, 5, 6,  // Row 1
-    7, 8, 9   // Row 2
-]
-
-// Access grid[row][col] as grid[row * width + col]
-let row = 1
-let col = 2
-let width = 3
-let value = grid[row * width + col]  // Gets 6 (row 1, col 2)
-```
-
-### Array Assignment
-```uwscript
-let numbers = [10, 20, 30, 40, 50]
-
-// Assign to array elements
-numbers[0] = 15
-numbers[2] = numbers[1] + 5
-
-// Compound assignment to array elements
-numbers[3] += 10     // numbers[3] = numbers[3] + 10
-numbers[4] *= 2      // numbers[4] = numbers[4] * 2
-```
-
-## Variables and Assignment
-
-### Variable Declaration
-```uwscript
-// Declaration with initialization
-let name = "Gray Goblin"
-let health = 50
-let is_friendly = true
-let items = ["sword", "shield", "potion"]
-```
-
-### Assignment
-```uwscript
-// Basic assignment
-health = health - 10
-is_friendly = false
-
-// Compound assignment operators
-health += 5   // Equivalent to: health = health + 5
-health -= 2   // Equivalent to: health = health - 2
-health *= 2   // Equivalent to: health = health * 2
-health /= 2   // Equivalent to: health = health / 2
-```
-
-## Control Flow
-
-### If Statements
-```uwscript
-// Simple if-else
-if health <= 0
-    say "I'm dying!"
-    exit
+if visits == 0
+    say "Welcome, stranger."
+else
+    say "Welcome back!"
 endif
+set_quest(10, visits + 1)
+exit
+```
 
-// If-elseif-else chain
+- Statements end at the line break. Only the lists of `menu [...]`, `filtermenu [...]`, array literals and function call arguments may span several lines.
+- The main program is every statement outside a function. It runs from the top and ends at `exit` or at the end of the file.
+- Functions are defined at the top level, anywhere in the file, and can be called before their definition.
+- Keywords: `if elseif else endif while endwhile function endfunction return let say ask menu filtermenu goto label exit and or not true false`.
+- Identifiers start with a letter or `_` and continue with letters, digits or `_`. They are case-sensitive.
+
+## 2. Values and types
+
+Every value is a 16-bit word, like in the game's conversation VM.
+
+| Type | Examples | Notes |
+|------|----------|-------|
+| Integer | `42`, `0`, `-1` | Signed 16-bit (−32768 to 32767). Results wrap around, so `300 * 300` is 24464 and the literal `65535` equals `-1`. Literals are written 0–65535; use `-` for negative values. Division truncates toward zero. |
+| Boolean | `true`, `false` | Stored as 1 and 0. Any non-zero value counts as true. |
+| String | `"Hello"` | A string is a *string id* into the conversation's string block (see [Strings](#5-strings)). |
+| Array | `[1, 2, 3]` | A fixed block of words; see [Arrays](#6-arrays). |
+
+The compiler tracks whether a variable holds a string or an integer, so that it prints correctly when you join it into text. A variable is a string when it is initialized with a string (a literal, a joined string, a string array element, a function that returns a string), filled by `ask`, or a parameter that receives a string at any call.
+
+## 3. Variables
+
+```uwscript
+let gold = 100              // declare and initialize
+gold = gold - 10            // assign
+gold += 20                  // compound assignment: += -= *= /= %=
+```
+
+- A variable must be declared with `let` before it can be assigned. Declaring the same name again in the same scope reuses the variable.
+- **Scope is per function, not per block.** Variables declared in the main program (also inside its `if`/`while` blocks) are *globals*. Variables declared inside a function are *locals* of that function, as are its parameters.
+- Functions can read and assign globals. A local or parameter with the same name hides the global.
+- Inside a function, `ask`, `menu` and `filtermenu` store into a global of that name if one exists (like an assignment); otherwise they declare a local.
+- Globals keep their value for the whole conversation. Locals exist only while the function runs; every call, including recursive calls, gets fresh ones.
+- Names of functions and built-in functions cannot be used as variable names.
+
+### Saved globals
+
+The game keeps a conversation's globals between talks with the same NPC. `let name` without a value (main program only) declares a global that is *not* set when the conversation starts, so it keeps the value from the last talk (0 the first time):
+
+```uwscript
+let visits                  // keeps its value between talks
+visits += 1
+if visits > 1
+    say "You again? That makes " + visits + " visits."
+endif
+```
+
+A `let` with a value sets the variable again every time. In the game, the size of the saved area per conversation is set in `babglobals.dat` (see [compiler-internals.md](compiler-internals.md#saved-globals)). In the VM, `--globals FILE` saves and restores the state between runs.
+
+### Game globals
+
+These variables are predefined. They read and change the player, the NPC and the game. The game fills them in when the conversation starts and takes changes back at the end, so `npc_attitude = 0` makes the NPC hostile.
+
+| Variables | Meaning |
+|-----------|---------|
+| `play_name` (string), `play_level`, `play_sex` (0 male, 1 female) | the player |
+| `play_hp`, `play_health`, `play_mana`, `play_hunger`, `play_poison`, `play_arms`, `play_power`, `play_drawn`, `new_player_exp` | more player properties |
+| `npc_name` (string), `npc_whoami`, `npc_level`, `npc_talkedto` (1 after the first talk) | the NPC |
+| `npc_attitude` (0 hostile, 1 upset, 2 mellow, 3 friendly), `npc_goal`, `npc_gtarg` | the NPC's mood and behaviour |
+| `npc_hp`, `npc_health`, `npc_hunger`, `npc_arms`, `npc_power`, `npc_xhome`, `npc_yhome` | more NPC properties |
+| `dungeon_level`, `game_days`, `game_time`, `game_mins`, `riddlecounter` | the game |
+
+```uwscript
+if npc_talkedto == 0
+    say "Greetings, " + play_name + ". I am " + npc_name + "."
+endif
+npc_talkedto = 1
+```
+
+Game globals are assigned without `let`, and their names cannot be used for other variables. In the VM, set them with `--set npc_attitude=3 --set play_name=Shanra`.
+
+## 4. Operators
+
+From lowest to highest precedence:
+
+| Precedence | Operators | Meaning |
+|------------|-----------|---------|
+| 1 | `or` | logical or (result 0 or 1) |
+| 2 | `and` | logical and (result 0 or 1) |
+| 3 | `==` `!=` | equal, not equal (on two strings: compares the text) |
+| 4 | `<` `>` `<=` `>=` | comparisons (result 0 or 1) |
+| 5 | `+` `-` | addition, subtraction; `+` also joins strings |
+| 6 | `*` `/` `%` | multiplication, integer division, remainder |
+| 7 | `-x` `not x` `!x` | negation, logical not |
+| 8 | `f(x)` `a[i]` `( )` | call, indexing, grouping |
+
+- `and`, `or` and `not` treat every non-zero value as true, so `1 and 2` is true. Both sides are always evaluated (no short-circuit).
+- `not` binds tighter than comparisons: write `not (a == b)` rather than `not a == b`.
+- Division truncates toward zero, and the remainder has the sign of the dividend (`-7 / 2` is `-3`, `-7 % 2` is `-1`). Division and remainder by zero give 0 in the VM.
+- `-`, `*`, `/`, `%` and `<`/`>`/`<=`/`>=` cannot be used on strings. Inside text, put arithmetic in parentheses: `"n=" + (x - 1)`.
+
+## 5. Strings
+
+### Literals
+
+```uwscript
+say "He said \"Hello!\""            // \" quote, \\ backslash
+say "Line one\nLine two"            // \n newline, \t tab
+```
+
+A string literal must close on the same line. Every distinct literal becomes one entry in the string block.
+
+### Joining strings
+
+`+` joins text when at least one side of the chain is a string:
+
+```uwscript
+let name = "Avatar"
+let level = 3
+say "Welcome, " + name + " of level " + level + "!"
+say "Next level in " + (level + 1) * 100 + " points."   // (...) is computed first
+say 7 + " gold coins"
+```
+
+The game cannot build strings at runtime, so the compiler creates a *string template* with [text substitution codes](compiler-internals.md#text-substitution) (`@GI12`, `@SS0`, ...). The game fills these in when the string is shown. In practice:
+
+- In `say` and in menu options, variables are shown with their current value.
+- **A joined string that is stored** (in a variable, an array element, a parameter or a return value) keeps the values from the moment it was built:
+
+  ```uwscript
+  let status = "HP: " + hp
+  hp = 0
+  say status          // still shows the old HP
+  ```
+
+- Each `+` expression in the source has one snapshot buffer. If the same line builds a string again (in a loop or a second call of the same function), strings stored from earlier runs show the newest values.
+- `s += "more"` appends to a string variable (or string array element). The game cannot create strings at runtime, so a string built from itself (`s += ...`, `s = s + ...`, or a recursive `return "<" + f(n - 1) + ">"`) can only be built once. For conversations (the default `uw` target), the compiler refuses such a line if it can run again: in a loop, in a function, or in a program with labels. With `--target console`, the fantasy console expands the text when it is built, so it also works in loops.
+- Joined strings may contain other joined strings. The VM expands substitutions up to 8 levels deep; the original game may expand only one level.
+- Text that contains `@` followed by `GI`, `GS`, `SI` or `SS` and a number is read as a substitution code.
+
+### Comparing strings
+
+`==` and `!=` between two string values compare the text and ignore case: they call the built-in `compare`. Comparisons with integers compare the numbers.
+
+```uwscript
+ask answer
+if answer == "echo"
+    say "Correct!"
+endif
+```
+
+## 6. Arrays
+
+```uwscript
+let numbers = [10, 20, 30, 40, 50]
+let items = ["sword", "shield", "potion"]     // arrays of string ids
+let board = [
+    [1, 0, 1],
+    [0, 1, 0]
+]                                              // nested arrays must be rectangular
+
+say "Second item: " + items[1]                 // indexes start at 0
+numbers[2] = 35
+numbers[3] += 1
+board[1][2] = 1
+say "Center: " + board[1][1]
+```
+
+- Arrays are created with `let` and an array literal, and their size is fixed. Array literals are only allowed in `let`.
+- Elements are words: numbers, booleans or string ids. An array whose elements are all strings is a string array, and its elements print as text.
+- Constant indexes are checked at compile time. Computed indexes are not checked at runtime, so stay within the size.
+- An array used as a value (for example `f(numbers)`) is its *address*. Inside the function, the parameter is indexed like an array, and changes are visible to the caller:
+
+  ```uwscript
+  function double_all(values, count)
+      let i = 0
+      while i < count
+          values[i] *= 2
+          i += 1
+      endwhile
+  endfunction
+  double_all(numbers, 5)
+  ```
+
+- Only declared arrays support several indexes (`board[r][c]`). A parameter holding an array address takes one index. `board[r]` alone is the address of row `r`; it can be read or passed to a function, but not assigned.
+
+## 7. Control flow
+
+```uwscript
 if health <= 0
     say "I'm dying!"
-elseif health < 20
-    say "I'm badly wounded!"
 elseif health < 50
     say "I'm injured."
 else
     say "I'm fine!"
 endif
-```
 
-### While Loops
-```uwscript
-let counter = 5
-while counter > 0
-    say "Counting down: " + counter
-    counter -= 1
-endwhile
-
-// Complex conditions
-let health = 100
-let mana = 50
-let turn = 0
-
-while health > 0 and mana > 10 and turn < 5
-    say "Combat turn " + turn
-    health -= 20
-    mana -= 15
+while turn < 5 and health > 0
+    health -= 10
     turn += 1
 endwhile
-```
 
-### Labels and Goto
-```uwscript
-label start_conversation
-say "Hello, traveler!"
-// ... conversation logic ...
-goto start_conversation  // Jump back to the label
-
-label shop_menu
-// ... shop logic ...
-if continue_shopping
-    goto shop_menu
+label start                 // a jump target
+menu choice ["Again", "Bye"]
+if choice == 1
+    goto start
 endif
+exit                        // end the conversation
 ```
 
-## Functions
+- Labels belong to the main program or to the function they are written in, and `goto` can only jump within that scope. Label names must be unique within their scope.
 
-UWScript supports user-defined functions with parameters and return values.
+## 8. Functions
 
-### Function Definition
 ```uwscript
-// Function with parameters and return value
-function calculate_damage(base_damage, strength, weapon_bonus)
-    let total = base_damage + strength + weapon_bonus
+function damage(base, bonus)
+    let total = base + bonus
     if total < 1
-        total = 1  // Minimum damage
+        return 1
     endif
     return total
 endfunction
 
-// Function without parameters
-function greet_player()
-    say "Welcome, brave adventurer!"
-    return 0
-endfunction
-
-// Function without return value (implicit return 0)
-function heal_player(amount)
-    let current_health = get_quest(100)
-    current_health += amount
-    if current_health > 100
-        current_health = 100
-    endif
-    set_quest(100, current_health)
-endfunction
+let hit = damage(10, 5)
+say "You deal " + damage(3, 4) + " damage."
+damage(1, 1)               // the result may be ignored
 ```
 
-### Function Calls
+- Parameters are passed by value, except arrays, which are passed by address. A call must pass exactly as many arguments as the function has parameters.
+- `return value` returns a value, and `return` alone returns 0. A function that ends without `return` returns 0.
+- Recursion works. Runaway recursion stops the VM with a "Stack overflow" error.
+- `return` is only allowed inside functions; use `exit` in the main program. `exit` inside a function ends the whole conversation.
+- Functions cannot be nested or defined inside `if`/`while` blocks, and they cannot reuse the name of a built-in function.
+
+## 9. Dialogue
+
 ```uwscript
-// Call function and use return value
-let damage = calculate_damage(10, 15, 5)
-say "You deal " + damage + " damage!"
+say "Hello, I am a shopkeeper."          // the NPC speaks
 
-// Call function without using return value
-greet_player()
-heal_player(25)
+ask reply                                // the player types text; reply becomes a string
+say "You said: " + reply
 
-// Use function return in expressions
-if calculate_damage(5, 10, 0) > 10
-    say "That's a powerful attack!"
-endif
-```
-
-### Function Scope
-- Functions have their own local variable scope
-- Parameters are accessed as local variables within the function
-- Functions can access global variables
-- Local variables shadow global variables of the same name
-
-## Dialogue System
-
-### Say Statements
-```uwscript
-// Simple dialogue
-say "Hello, I am a shopkeeper."
-
-// String concatenation with variables
-let player_name = "Avatar"
-say "Welcome, " + player_name + "!"
-```
-
-### Ask Statements
-```uwscript
-// Get user input
-ask response
-say "You said: " + response
-
-// Store input in a variable
-ask player_name
-say "Nice to meet you, " + player_name + "!"
-```
-
-### Menu System
-```uwscript
-// Bracket notation (preferred for multi-line)
-menu choice [
+menu choice [                            // the player picks an option; choice is 1, 2, ...
     "Tell me about your wares",
-    "I'd like to buy something", 
-    "What news from the outside?",
     "Goodbye"
 ]
+menu answer "Yes", "No"                  // short form on one line
 
-// Comma-separated notation (for simple menus)
-menu choice "Yes", "No", "Maybe"
-
-// Handle menu choice
-if choice == 1
-    say "I sell the finest weapons in the land!"
-elseif choice == 2
-    say "Let me show you what I have..."
-elseif choice == 3
-    say "Strange times indeed..."
-else
-    say "Farewell, traveler!"
-    exit
-endif
-```
-
-### Filtered Menu System
-```uwscript
-// Some options can be disabled based on conditions
-filtermenu choice [
-    "Ask about the castle", has_met_king,
-    "Ask about the princess", knows_princess and reputation > 50,
-    "Ask about the quest", quest_active,
-    "Buy healing potion", gold >= 50,
+filtermenu pick [                        // option text, condition pairs
+    "Bronze sword (50 gold)", gold >= 50,
+    "Health potion (10 gold)", gold >= 10,
     "Leave", true
 ]
-
-// Only enabled options will be shown to the player
 ```
 
-## Built-in Functions
+- `menu` and `filtermenu` store the chosen option's position (starting at 1) in the variable, which is declared automatically. For `filtermenu`, the position counts *all* options, shown or hidden, so the code above can test `pick == 3` for "Leave" whatever is hidden.
+- Options can be joined strings, for example `"Pay " + price + " gold"`.
+- The variable after `ask`/`menu`/`filtermenu` is optional. In the short `menu` form, an identifier directly followed by `,` or the end of the line is the first option, not the variable: `menu a, b` shows the strings in `a` and `b`, while `menu choice a, b` also stores the result.
 
-### Core Ultima Underworld Functions
-```uwscript
-// Random numbers
-let roll = random(20)        // Returns 1-20
-let coin_flip = random(2)    // Returns 1-2
+## 10. Built-in functions
 
-// Quest flag management
-let has_key = get_quest(5)   // Get quest flag 5
-set_quest(6, 1)              // Set quest flag 6 to 1
+All built-ins pass their arguments by reference, as the game expects; the compiler handles this. The compiler checks the number of arguments.
 
-// String operations
-let str_equal = compare("hello", "HELLO")     // Case-insensitive: returns 1
-let len = string_length("hello")              // Returns 5
-let contains = contains("hello world", "world")  // Returns 1 (true)
+### Ultima Underworld functions
 
-// World interaction
-gronk_door(10, 15, 0)  // Open door at coordinates (10, 15)
-gronk_door(10, 15, 1)  // Close door at coordinates (10, 15)
+These are the game's imported functions (see [conversation_spec.txt](../../docs/conversation_spec.txt) §7.6). A function marked – returns nothing and cannot be used as a value. `print` with four arguments is the fantasy console's version.
+
+**Dialogue and text**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `print(text)` | – | show a text no one speaks (a scene description) |
+| `compare(a, b)` | 0/1 | 1 if the strings are equal, ignoring case (`==` on strings uses it) |
+| `contains(text, part)` | 0/1 | 1 if `text` contains `part`, ignoring case |
+| `string_length(s)` | int | length of a string (the game's `length`) |
+| `sex(female, male)` | string | `female` for a female avatar, else `male` |
+
+**Quests and the world**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `random(n)` | int | random number from 1 to n |
+| `get_quest(quest)` | int | value of quest flag `quest` |
+| `set_quest(quest, value)` | – | set quest flag `quest` to `value` |
+| `gronk_door(x, y, close)` | int | open (`close` = 0) or close the door at tile (x, y) |
+| `place_object(x, y, slot)` | – | put an object from `do_inv_create` into the world |
+| `remove_talker()` | – | the NPC leaves |
+| `set_attitude(a, b)`, `set_race_attitude(...)` | – | change attitudes (arguments not fully known) |
+| `x_skills(a, b)`, `x_traps(a, b)` | int | skill and trap queries (arguments not fully known) |
+| `x_obj_stuff(...9 args)` | – | set object properties in the inventory list |
+
+**Inventory and bartering**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `setup_to_barter()` | – | start bartering, showing the NPC's items |
+| `show_inv(positions, ids)` | int | copy the player's barter items into two arrays (4 entries each) |
+| `do_offer(a1, ..., a5[, a6, a7])` | 0/1 | does the NPC accept the current deal |
+| `do_demand(refuse_text, agree_text)` | 0/1 | try to make the NPC hand over the items |
+| `do_judgement()`, `do_decline()` | – | judge the deal, decline it |
+| `give_to_npc(positions, count)` | int | give items from the player to the NPC |
+| `give_ptr_npc(quantity, position)` | int | give one item (quantity -1 to ignore) |
+| `take_from_npc(item)` | int | give the player an item (or a category if > 1000); 2 if no room |
+| `take_id_from_npc(position)`, `take_from_npc_inv(n)` | int | give the player an item by inventory position |
+| `do_inv_create(item)` | int | create an item for the NPC; returns its inventory position |
+| `do_inv_delete(item)` | int | delete an item from the NPC |
+| `check_inv_quality(position)` / `set_inv_quality(quality, position)` | int | read / set an item's quality |
+| `count_inv(item)` | int | count items |
+| `identify_inv(a, b, c, position)` | int | identify an item |
+| `find_inv(where, item)` | int | find an item (`where` 0 NPC, 1 player); 0 if not found |
+| `find_barter(item)`, `find_barter_total(a, b, c, d)` | int | find items in the barter area |
+| `set_likes_dislikes(likes, dislikes)` | – | arrays of item types the NPC likes or dislikes, ending with -1 |
+
+In the terminal VM, these functions print what they would do and return plausible values. `get_quest` returns 0 until the program sets a flag, `find_inv` finds only the items given with `--item ID`, and `sex` follows `--set play_sex=1`.
+
+### Fantasy console functions
+
+These exist only on the [fantasy console](../../fantasy_console/README.md) (128×128 pixels, 16 colors), so the compiler accepts them only with `--target console`.
+
+| Function | Description |
+|----------|-------------|
+| `clear_screen([color])` | fill the screen (default black) |
+| `set_pixel(x, y, color)` | set one pixel |
+| `draw_line(x1, y1, x2, y2, color)` | draw a line |
+| `draw_rect(x, y, w, h, color)` / `fill_rect(...)` | outline / filled rectangle |
+| `draw_circle(x, y, radius, color)` | circle outline |
+| `draw_sprite(x, y, sprite)` | draw an array `[width, height, pixel, ...]`; color 0 is transparent |
+| `fill_circle(x, y, radius, color)` | filled circle |
+| `print(x, y, text, color)` | draw text with the built-in 3×5 font |
+| `get_pixel(x, y)` | color at a pixel, -1 outside the screen |
+| `flip_display()` | show the frame (and end the current frame) |
+| `play_tone(frequency, ms, channel)` | play a tone |
+| `is_key_pressed(key)` / `is_key_released(key)` | keys: 0 up/W, 1 down/S, 2 left/A, 3 right/D, 4 space, 5 return, 6 escape, 7 Z, 8 X |
+| `math_sin(deg)` / `math_cos(deg)` | sine/cosine × 100 |
+| `math_sqrt(n)` | integer square root |
+| `delay(ms)` | pause |
+| `get_frame()` | frames shown so far |
+
+## 11. Compile errors
+
+The compiler stops at the first error and reports its line (and usually its column), for example:
+
+```
+shop.uws: error: Line 12, column 1: Missing 'endif' for 'if' started at line 4
 ```
 
-## Fantasy Console Functions
+It reports, among others: unknown characters, unterminated strings, numbers above 65535, missing or stray block keywords, statements that are neither an assignment nor a call (`x`, `a == 1`), undefined variables, functions and labels, wrong argument counts, arithmetic on strings, assigning a whole row of an array, `return` outside a function, nested function definitions, constant array indexes out of bounds, non-rectangular nested arrays, using a void function as a value, redeclaring a game global, programs that need more than 0x8000 words of globals, and, for the default `uw` target, fantasy console functions and strings built from themselves on lines that can run again.
 
-UWScript can target fantasy consoles with additional graphics, sound, and input functions.
+### Targets
 
-### Graphics Functions
-```uwscript
-// Screen management
-clear_screen(0)              // Clear with color 0 (black)
-flip_display()               // Update the display
+`--target uw` (the default) accepts only what the original game supports, so the output can become a real conversation. `--target console` also allows the fantasy console functions and the console's runtime string building.
 
-// Drawing primitives
-set_pixel(50, 50, 15)        // Set pixel at (50,50) to color 15
-draw_line(0, 0, 127, 127, 2) // Draw red line from (0,0) to (127,127)
-draw_rect(10, 10, 50, 30, 4) // Draw blue rectangle outline
-fill_rect(20, 20, 30, 20, 3) // Draw filled green rectangle
-draw_circle(64, 64, 25, 1)   // Draw white circle at center
-
-// Sprite rendering
-let player_sprite = [
-    8, 8,                    // 8x8 sprite
-    0, 0, 1, 1, 1, 1, 0, 0, // Row 0
-    0, 1, 1, 2, 2, 1, 1, 0, // Row 1 (red eyes)
-    // ... more pixel data
-]
-draw_sprite(50, 50, player_sprite)  // Draw sprite at (50, 50)
-
-// Text rendering
-print(10, 10, "Score: 1000", 15)   // Print text at (10,10) in white
-```
-
-### Sound Functions
-```uwscript
-// Play tones
-play_tone(440, 500, 0)      // Play 440Hz for 500ms on channel 0
-play_tone(880, 250, 1)      // Play 880Hz for 250ms on channel 1
-```
-
-### Input Functions
-```uwscript
-// Key constants
-let KEY_UP = 0
-let KEY_DOWN = 1
-let KEY_LEFT = 2
-let KEY_RIGHT = 3
-let KEY_SPACE = 4
-let KEY_RETURN = 5
-let KEY_ESCAPE = 6
-
-// Check key states
-if is_key_pressed(KEY_UP)
-    player_y -= 2
-endif
-
-if is_key_released(KEY_SPACE)
-    // Fired projectile
-endif
-```
-
-### Math Functions
-```uwscript
-// Trigonometry (angles in degrees)
-let x_offset = math_cos(angle)       // Returns scaled integer
-let y_offset = math_sin(angle)       // Returns scaled integer
-
-// Other math
-let distance = math_sqrt(dx * dx + dy * dy)
-```
-
-## Operators
-
-### Arithmetic Operators
-- `+`: Addition (numbers) or concatenation (strings)
-- `-`: Subtraction
-- `*`: Multiplication  
-- `/`: Division (integer division)
-- `%`: Modulo (remainder)
-
-### Comparison Operators
-- `==`: Equal to
-- `!=`: Not equal to
-- `>`: Greater than
-- `<`: Less than
-- `>=`: Greater than or equal to
-- `<=`: Less than or equal to
-
-### Logical Operators
-- `and`: Logical AND
-- `or`: Logical OR
-- `not`: Logical NOT
-
-### Assignment Operators
-- `=`: Basic assignment
-- `+=`: Add and assign
-- `-=`: Subtract and assign
-- `*=`: Multiply and assign
-- `/=`: Divide and assign
-
-### Unary Operators
-- `-`: Negation (e.g., `-x`)
-- `not`: Logical NOT (e.g., `not is_alive`)
-
-## String Operations
-
-### String Concatenation
-```uwscript
-let full_name = first_name + " " + last_name
-say "Hello, " + player_name + "!"
-
-// Automatic variable substitution (compiler feature)
-let health = 75
-say "Health: " + health  // Becomes "Health: @SI0" in assembly
-```
-
-### String Literals
-```uwscript
-// Basic strings
-let message = "Hello, world!"
-
-// Escape sequences
-let formatted = "Name:\tAvatar\nLevel:\t5"  // Tab and newline
-let quoted = "He said, \"Hello!\""          // Embedded quotes
-let path = "C:\\Games\\UW"                  // Backslash
-```
-
-### String Substitution (Advanced)
-The compiler automatically handles string concatenation with variables by generating UW text substitution codes:
-
-- `@SI<n>`: Substitute integer variable at offset n
-- `@SS<n>`: Substitute string variable at offset n
-
-## Memory Model
-
-### Variable Allocation
-- Global variables are allocated sequentially starting from offset 0
-- Function parameters are accessed as negative offsets from base pointer
-- Local variables are allocated after parameters
-- Arrays occupy consecutive memory slots
-- Temporary variables are managed automatically
-
-### Scoping Rules
-- Global scope: Variables declared at program level
-- Function scope: Parameters and local variables within functions
-- Local variables shadow global variables of the same name
-- No block-level scoping (unlike C/Java)
-
-## EBNF Grammar
+## 12. Grammar
 
 ```ebnf
-program = { statement } ;
+program        = { statement } ;
+statement      = ( declaration | assignment | call | if | while | function
+                 | return | say | ask | menu | filtermenu | goto | label | "exit" ) end ;
+end            = [ comment ] ( newline | end_of_file ) ;
 
-statement = variable_declaration
-          | assignment
-          | if_statement
-          | while_statement
-          | function_definition
-          | function_call_statement
-          | return_statement
-          | say_statement
-          | ask_statement
-          | menu_statement
-          | filtermenu_statement
-          | goto_statement
-          | label_statement
-          | exit_statement ;
+declaration    = "let" identifier [ "=" ( expression | array_literal ) ] ;   (* no value: saved global *)
+assignment     = target ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" ) expression ;
+target         = identifier { "[" expression "]" } ;
+call           = identifier "(" [ expression { "," expression } ] ")" ;
 
-variable_declaration = "let" identifier "=" expression eol ;
+if             = "if" expression end block
+                 { "elseif" expression end block }
+                 [ "else" end block ] "endif" ;
+while          = "while" expression end block "endwhile" ;
+function       = "function" identifier "(" [ identifier { "," identifier } ] ")" end
+                 block "endfunction" ;                     (* top level only *)
+block          = { statement } ;
+return         = "return" [ expression ] ;                (* inside functions only *)
 
-assignment = assignment_target assignment_operator expression eol ;
-assignment_target = identifier | array_access ;
-assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" ;
+say            = "say" expression ;
+ask            = "ask" [ identifier ] ;
+menu           = "menu" [ identifier ] ( "[" expression { "," expression } "]"
+                                       | expression { "," expression } ) ;
+filtermenu     = "filtermenu" [ identifier ]
+                 "[" expression "," expression { "," expression "," expression } "]" ;
+goto           = "goto" identifier ;
+label          = "label" identifier ;
 
-if_statement = "if" expression eol
-               { statement }
-               { "elseif" expression eol { statement } }
-               [ "else" eol { statement } ]
-               "endif" eol ;
-
-while_statement = "while" expression eol
-                  { statement }
-                  "endwhile" eol ;
-
-function_definition = "function" identifier "(" [ parameter_list ] ")" eol
-                      { statement }
-                      "endfunction" eol ;
-parameter_list = identifier { "," identifier } ;
-
-function_call_statement = function_call eol ;
-
-return_statement = "return" [ expression ] eol ;
-
-say_statement = "say" expression eol ;
-
-ask_statement = "ask" [ identifier ] eol ;
-
-menu_statement = "menu" [ identifier ] ( array_literal | expression_list ) eol ;
-
-filtermenu_statement = "filtermenu" [ identifier ] array_literal eol ;
-
-goto_statement = "goto" identifier eol ;
-
-label_statement = "label" identifier eol ;
-
-exit_statement = "exit" eol ;
-
-expression = logical_or ;
-
-logical_or = logical_and { "or" logical_and } ;
-
-logical_and = equality { "and" equality } ;
-
-equality = comparison { ( "==" | "!=" ) comparison } ;
-
-comparison = additive { ( ">" | "<" | ">=" | "<=" ) additive } ;
-
-additive = multiplicative { ( "+" | "-" ) multiplicative } ;
-
-multiplicative = unary { ( "*" | "/" | "%" ) unary } ;
-
-unary = [ ( "-" | "not" ) ] postfix ;
-
-postfix = primary { ( "[" expression "]" | "(" [ expression_list ] ")" ) } ;
-
-primary = number
-        | string
-        | boolean
-        | identifier
-        | array_literal
-        | "(" expression ")" ;
-
-array_literal = "[" [ expression_list ] "]" ;
-
-expression_list = expression { "," expression } ;
-
-function_call = identifier "(" [ expression_list ] ")" ;
-
-array_access = postfix "[" expression "]" ;
-
-identifier = letter { letter | digit | "_" } ;
-
-number = digit { digit } ;
-
-string = '"' { character | escape_sequence } '"' ;
-
-boolean = "true" | "false" ;
-
-escape_sequence = "\\" ( "n" | "t" | '"' | "\\" ) ;
-
-eol = newline | eof ;
-
-comment = "//" { character } newline ;
-
-(* Lexical elements *)
-letter = "a".."z" | "A".."Z" ;
-digit = "0".."9" ;
-character = ? any Unicode character except newline ? ;
-newline = ? newline character ? ;
-eof = ? end of file ? ;
+expression     = or_expr ;
+or_expr        = and_expr { "or" and_expr } ;
+and_expr       = equality { "and" equality } ;
+equality       = comparison { ( "==" | "!=" ) comparison } ;
+comparison     = additive { ( "<" | ">" | "<=" | ">=" ) additive } ;
+additive       = term { ( "+" | "-" ) term } ;
+term           = unary { ( "*" | "/" | "%" ) unary } ;
+unary          = ( "-" | "not" | "!" ) unary | postfix ;
+postfix        = primary { "[" expression "]" } | call ;
+primary        = number | string | "true" | "false" | identifier | "(" expression ")" ;
+array_literal  = "[" ( expression | array_literal ) { "," ( expression | array_literal ) } "]" ;
 ```
 
-## Compilation
+Inside `[...]` lists and call parentheses, line breaks and comments are allowed between elements.
 
-### Compiler Usage
-```bash
-python uwscript_compiler.py input.uws -o output.asm -s strings.txt -b 1 -v
-```
+## 13. Examples
 
-Options:
-- `input.uws`: Source file
-- `-o output.asm`: Output assembly file
-- `-s strings.txt`: Output strings file  
-- `-b 1`: String block ID (default: 1)
-- `-v`: Verbose output
-- `--debug`: Enable debug mode
+The [samples](../samples) folder has runnable programs for each feature. Two longer examples follow.
 
-### Compilation Process
-1. **Lexical Analysis**: Tokenize source code
-2. **Parsing**: Build Abstract Syntax Tree (AST)
-3. **Code Generation**: Convert AST to UW assembly
-4. **String Extraction**: Collect string literals
-5. **Optimization**: Temporary variable management
-
-### Generated Files
-- **Assembly File**: Contains UW VM instructions
-- **Strings File**: Contains string literals in STRINGS.PAK format
-- **Debug Info**: Variable mappings and compilation statistics
-
-## Examples
-
-### Complete Fantasy Console Game
+### A fantasy console game
 ```uwscript
 // Simple Pong-like game
 let KEY_UP = 0
@@ -699,7 +506,7 @@ say "Thanks for playing!"
 exit
 ```
 
-### Interactive NPC Conversation
+### An NPC conversation
 ```uwscript
 // Merchant NPC with inventory system
 let player_gold = 100
@@ -787,5 +594,3 @@ endif
 
 goto start
 ```
-
-This specification now covers all the features implemented in the UWScript compiler, including arrays, fantasy console functions, proper function support with parameters, and the complete EBNF grammar.

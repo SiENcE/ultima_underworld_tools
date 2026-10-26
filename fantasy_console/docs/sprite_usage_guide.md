@@ -361,15 +361,23 @@ This will show:
 
 ## Assembly Code Generated
 
-When you use `draw_sprite()`, the UWScript compiler generates:
+When you use `draw_sprite()`, the UWScript compiler generates (globals start at address 96):
 
 ```assembly
-; For draw_sprite(x, y, sprite_data)
-PUSHI_EFF sprite_data_address  ; Address of sprite data
-PUSHI_EFF y_address           ; Y coordinate
-PUSHI_EFF x_address           ; X coordinate
+; let sprite = [2, 1, 3, 4] fills addresses 96-99; x is at 100, y at 101
+; draw_sprite(x, y, sprite)
+PUSHI 104                     ; temporary slot ...
+PUSHI 96                      ; ... that holds the sprite's address
+STO
+PUSHI 100                     ; pointer to x
+PUSHI 101                     ; pointer to y
+PUSHI 104                     ; pointer to the sprite address
 PUSHI 3                       ; 3 arguments
-CALLI 106                     ; Call draw_sprite function (ID 106)
+CALLI 106                     ; draw_sprite (ID 106)
+POP                           ; the caller removes the argument count ...
+POP                           ; ... and the three pointers
+POP
+POP
 ```
 
 The sprite data is stored in consecutive memory locations as defined in your array.

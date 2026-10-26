@@ -1,5 +1,8 @@
 # test_fantasy_console.py
 
+import contextlib
+import io
+import subprocess
 import unittest
 import pygame
 import os
@@ -9,7 +12,7 @@ import tempfile
 # The VM and the UWScript compiler live in ../uwscript
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uwscript'))
 from fantasy_console import FantasyConsole
-from uwscript_compiler import compile_uwscript
+from uwscript_compiler import compile_uwscript, GLOBALS_BASE
 
 class FantasyConsoleTests(unittest.TestCase):
     """Test cases for the FantasyUW fantasy console"""
@@ -36,7 +39,7 @@ class FantasyConsoleTests(unittest.TestCase):
     def compile_and_load(self, script, string_block=1):
         """Compile UWScript to assembly and load it into the console"""
         # Compile the script
-        result = compile_uwscript(script, string_block)
+        result = compile_uwscript(script, string_block, target='console')
         
         # Write assembly to temp file
         asm_path = os.path.join(self.temp_dir.name, "test.asm")
@@ -200,8 +203,7 @@ class FantasyConsoleTests(unittest.TestCase):
         self.execute_until_complete()
         
         # Check that key_state was set to 1 (key is pressed)
-        # Fix: Use base_pointer offset instead of direct memory address
-        self.assertEqual(self.console.get_mem(self.console.base_pointer), 1)
+        self.assertEqual(self.console.get_mem(GLOBALS_BASE), 1)
         
         # Reset and test key not pressed
         self.console.keys_pressed.clear()
@@ -209,8 +211,7 @@ class FantasyConsoleTests(unittest.TestCase):
         self.execute_until_complete()
         
         # Check that key_state was set to 2 (key not pressed)
-        # Fix: Use base_pointer offset instead of direct memory address
-        self.assertEqual(self.console.get_mem(self.console.base_pointer), 2)
+        self.assertEqual(self.console.get_mem(GLOBALS_BASE), 2)
     
     def test_complex_program(self):
         """Test a more complex program with multiple operations"""
@@ -314,9 +315,9 @@ class FantasyConsoleTests(unittest.TestCase):
         self.execute_until_complete()
         
         # Check that variables have the correct values
-        self.assertEqual(self.console.get_mem(self.console.base_pointer), 10)  # a
-        self.assertEqual(self.console.get_mem(self.console.base_pointer+1), 20)  # b
-        self.assertEqual(self.console.get_mem(self.console.base_pointer+2), 4)   # result
+        self.assertEqual(self.console.get_mem(GLOBALS_BASE), 10)  # a
+        self.assertEqual(self.console.get_mem(GLOBALS_BASE + 1), 20)  # b
+        self.assertEqual(self.console.get_mem(GLOBALS_BASE + 2), 4)   # result
     
     def test_string_operations(self):
         """Test string handling and say operations"""
@@ -328,12 +329,81 @@ class FantasyConsoleTests(unittest.TestCase):
         """
         
         self.compile_and_load(script)
-        self.execute_until_complete()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.execute_until_complete()
         
-        # Check that strings were correctly generated
-        # (This would normally be a SAY_OP instruction with the correct string ID)
-        self.assertTrue("Testing Console" in self.console.string_literals or 
-                      "Testing @SS0" in self.console.string_literals)
+        # The concatenation is a text substitution that the VM resolves when saying it
+        self.assertIn('NPC: "Testing Console"', output.getvalue())
+
+    def test_print_draws_font_glyphs(self):
+        """print() draws 3x5 glyphs, 4 pixels apart"""
+        self.compile_and_load('clear_screen(0)\nprint(10, 20, "1I", 7)\nexit\n')
+        self.execute_until_complete()
+        buf = self.console.display_buffer
+        # '1' is .#. / ##. / .#. / .#. / ### ; 'I' is ### / .#. / .#. / .#. / ###
+        self.assertEqual([buf[20][10], buf[20][11], buf[20][12]], [0, 7, 0])
+        self.assertEqual([buf[24][10], buf[24][11], buf[24][12]], [7, 7, 7])
+        self.assertEqual([buf[20][14], buf[20][15], buf[20][16]], [7, 7, 7])
+        self.assertEqual(buf[25][11], 0)
+
+    def test_line_leaving_the_screen_keeps_its_slope(self):
+        self.compile_and_load('clear_screen(0)\ndraw_line(0, 0, 200, 100, 2)\nexit\n')
+        self.execute_until_complete()
+        # y = x / 2 along the whole line, also near the right edge
+        buf = self.console.display_buffer
+        self.assertEqual(buf[60][120], 2)
+        self.assertIn(2, (buf[63][127], buf[64][127]))
+        # Clamping the end point to the screen used to bend the line to (127, 100)
+        self.assertEqual(buf[100][127], 0)
+
+    def test_fill_circle_and_get_pixel(self):
+        script = """
+        let inside = 0
+        let outside = 0
+        let off_screen = 0
+        clear_screen(0)
+        fill_circle(64, 64, 10, 6)
+        inside = get_pixel(64, 70)
+        outside = get_pixel(64, 80)
+        off_screen = get_pixel(-1, 5)
+        exit
+        """
+        self.compile_and_load(script)
+        self.execute_until_complete()
+        self.assertEqual(self.console.display_buffer[64][54], 6)
+        self.assertEqual(self.console.display_buffer[54][54], 0)
+        base = GLOBALS_BASE
+        self.assertEqual([self.console.get_mem(base + i) for i in range(3)], [6, 0, -1])
+
+    def test_frame_count_and_key_aliases(self):
+        script = """
+        let frames = get_frame()
+        let left = is_key_pressed(2)
+        let fire = is_key_pressed(7)
+        exit
+        """
+        self.compile_and_load(script)
+        self.console.frame_count = 12
+        self.console.keys_pressed.add(pygame.K_a)   # A is an alias for left
+        self.execute_until_complete()
+        base = GLOBALS_BASE
+        self.assertEqual([self.console.get_mem(base + i) for i in range(3)], [12, 1, 0])
+
+    def test_headless_run_with_screenshot(self):
+        source = os.path.join(self.temp_dir.name, "game.uws")
+        shot = os.path.join(self.temp_dir.name, "shot.png")
+        with open(source, "w") as f:
+            f.write("label top\nclear_screen(3)\nset_pixel(1, 2, 5)\nflip_display()\ngoto top\n")
+        here = os.path.dirname(os.path.abspath(__file__))
+        result = subprocess.run([sys.executable, os.path.join(here, "fantasy_console.py"), source,
+                                 "--headless", "--frames", "3", "--screenshot", shot],
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        image = pygame.image.load(shot)
+        self.assertEqual(image.get_size(), (128, 128))
+        self.assertEqual(tuple(image.get_at((0, 0)))[:3], self.console.palette[3])
+        self.assertEqual(tuple(image.get_at((1, 2)))[:3], self.console.palette[5])
 
 if __name__ == "__main__":
     unittest.main()

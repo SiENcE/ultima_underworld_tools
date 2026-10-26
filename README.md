@@ -13,10 +13,17 @@ A collection of Python utilities for analyzing, extracting, and modifying conten
 ### Conversation Tools (`tools/conversations/`)
 5. **uw_cnv_decompiler.py** - Extracts conversations from CNV.ARK, decompresses UW2 archives, and decompiles bytecode to readable assembly
 6. **uw_cnv_compiler.py** - Compiles conversation assembly files back to binary format and can update a slot in the CNV.ARK file
-7. **uw_cnv_runner.py** - A virtual machine for running and testing Ultima Underworld conversation scripts
+7. **uw_cnv_runner.py** - Runs conversation scripts in the terminal, with the same game-faithful VM as UWScript (`uwscript/uwscript_vm.py`)
 
 ### UWScript (`uwscript/`)
-A high-level language that compiles to UW conversation assembly. See [uwscript/README.md](uwscript/README.md).
+A high-level language for conversations that compiles to UW conversation assembly that the game tools above turn into real conversations. Its VM (`uwscript_vm.py`) follows the game's engine and runs the result in the terminal:
+
+```bash
+python uwscript/uwscript_compiler.py uwscript/samples/conversation_gray_goblin.uws   # writes .asm + _strings.txt
+python uwscript/uwscript_vm.py uwscript/samples/conversation_gray_goblin.uws         # compile and run
+```
+
+See [uwscript/README.md](uwscript/README.md).
 
 ### Fantasy Console (`fantasy_console/`)
 A pygame-based "fantasy console" that extends the conversation VM with graphics, input and sound, programmed in UWScript. See [fantasy_console/README.md](fantasy_console/README.md).
@@ -27,7 +34,7 @@ A pygame-based "fantasy console" that extends the conversation VM with graphics,
 tools/
   strings/           STRINGS.PAK analyzer, extractor, packer and translator
   conversations/     CNV.ARK decompiler, compiler and conversation VM
-uwscript/            UWScript compiler, its VM, samples and language docs
+uwscript/            UWScript compiler, its VM, samples, tests and language docs
 fantasy_console/     Fantasy console built on the VM, with game samples
 docs/                Conversation format spec, development manual, translator guide
 ```
@@ -36,7 +43,7 @@ The tools read and write files relative to the current working directory, so run
 
 ## Requirements
 
-- Python 3.6 or higher
+- Python 3.8 or higher
 - The string and conversation tools only use the Python standard library
 - Optional: translator backends - `pip install -r tools/strings/requirements-translator.txt` (see [docs/translator.md](docs/translator.md))
 - Optional: fantasy console - `pip install -r fantasy_console/requirements.txt`
@@ -149,7 +156,8 @@ This interactive tool allows you to:
 - Execute conversation scripts
 - Make dialogue choices
 - Test conversation logic
-- Simulate game world variables
+- Simulate game world variables (`--set npc_attitude=3`, `--quest 5=1`, `--item 128`)
+- Replay later talks with saved globals (`--globals state.json`)
 
 ## Notes on Editing
 

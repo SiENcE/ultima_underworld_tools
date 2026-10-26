@@ -20,31 +20,16 @@ A minimal old-school space shooter game for the FantasyUW console, inspired by c
 
 ## How to Run
 
-### Prerequisites
-
-Make sure you have these files in the same directory:
-- `uwscript_compiler.py` - The UWScript compiler
-- `fantasy_console.py` - The fantasy console VM
-- `uw_cnv_runner.py` - The base VM implementation
-- `astro_wars.uws` - The game source code
-
-### Option 1: Use the Run Script (Recommended)
+Install pygame (`pip install -r ../requirements.txt`), then from the `fantasy_console` folder:
 
 ```bash
-python run_astro_wars.py
+# Compile and run in one step
+python fantasy_console.py samples/fantasy_game_astro_wars.uws --fps 60
+
+# Or compile first (writes samples/fantasy_game_astro_wars.asm and _strings.txt), then run
+python ../uwscript/uwscript_compiler.py samples/fantasy_game_astro_wars.uws -v
+python fantasy_console.py samples/fantasy_game_astro_wars.asm --fps 60
 ```
-
-### Option 2: Manual Compilation
-
-1. **Compile the game**:
-   ```bash
-   python uwscript_compiler.py astro_wars.uws -o astro_wars.asm -s astro_wars_strings.txt -v
-   ```
-
-2. **Run the game**:
-   ```bash
-   python fantasy_console.py astro_wars.asm --strings astro_wars_strings.txt --fps 60
-   ```
 
 ## Game Mechanics
 

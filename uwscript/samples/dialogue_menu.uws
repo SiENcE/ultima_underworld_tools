@@ -1,4 +1,4 @@
-// Simple menu test
+// Dialogue: a menu written as a comma separated list
 let player_name = "Avatar"
 
 say "Hello, " + player_name

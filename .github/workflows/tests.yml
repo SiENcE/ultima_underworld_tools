@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.12"]
+    env:
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pip install -r fantasy_console/requirements.txt
+
+      - name: UWScript compiler, VM and game tools
+        working-directory: uwscript
+        run: python -m unittest test_uwscript -v
+
+      - name: Fantasy console
+        working-directory: fantasy_console
+        run: python -m unittest fantasy_console_test -v
+
+      - name: Fantasy console samples (headless)
+        working-directory: fantasy_console
+        run: |
+          for sample in samples/*.uws; do
+            echo "== $sample"
+            python fantasy_console.py "$sample" --headless --frames 20 || exit 1
+          done
+
+      - name: UWScript samples compile for the game
+        working-directory: uwscript
+        run: |
+          for sample in samples/*.uws; do
+            python uwscript_compiler.py "$sample" -o "$RUNNER_TEMP/out.asm" -s "$RUNNER_TEMP/out_strings.txt" || exit 1
+          done

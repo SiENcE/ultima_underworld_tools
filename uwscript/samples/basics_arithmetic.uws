@@ -1,4 +1,4 @@
-// Test arithmetic operations
+// Arithmetic: +, -, *, /, compound assignment and a countdown loop
 let a = 10
 let b = 3
 

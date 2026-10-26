@@ -1,4 +1,4 @@
-// While loop test cases
+// While loops with text output: countdown, combat, nested loops, combined conditions
 let countdown = 5
 
 say "Starting countdown..."
